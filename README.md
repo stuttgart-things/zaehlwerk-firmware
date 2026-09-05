@@ -8,7 +8,7 @@ the hub holds wifi and talks to `zaehlwerk-api`.
 ```
 button (C3, battery, deep sleep) ──┐
                                    ├──ESP-NOW──> hub (mains, wifi) ──HTTP──> zaehlwerk-api
-piezo (mains)  ────────────────────┘
+piezo (mains) ─────────────────────┘
 ```
 
 ## Environments
@@ -19,7 +19,7 @@ One PlatformIO project, three environments:
 | --- | ----- | ----- | ---- |
 | `button` | ESP32-C3 Super Mini | Battery, deep sleep | Wake on press, send, sleep |
 | `hub` | ESP32 | Mains | Receive, forward over HTTP |
-| `piezo` | ESP32 | Mains | Hit detection; may also take the hub role |
+| `piezo` | ESP32 | Mains | Hit detection, send over ESP-NOW; the board may also host the hub |
 
 ```bash
 pio run -e button -t upload

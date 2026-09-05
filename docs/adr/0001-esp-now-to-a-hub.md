@@ -27,7 +27,10 @@ A button wakes from deep sleep on the GPIO, sends, and sleeps again.
   weekend.
 - No access point needed at the table. The hub can carry its own.
 - The hub is a single point of failure and must be powered. Where the piezo unit
-  is built it is mains-powered anyway and can take the role.
+  is built its board is mains-powered anyway, so it may host the hub alongside
+  the sensing. That is a choice about where the hub runs, not a second path to
+  the API: every field device, the piezo unit included, reports over ESP-NOW,
+  and only the hub holds wifi.
 - Devices must be paired to the hub, so there is a provisioning step that plain
   wifi would not have needed.
 - ESP-NOW gives no delivery guarantee, so senders retry. That is what makes the
