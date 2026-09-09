@@ -53,7 +53,37 @@ discards all but the first as duplicates — see
 | --- | ------- |
 | [0001](docs/adr/0001-esp-now-to-a-hub.md) | Why ESP-NOW to a hub rather than wifi on every device |
 
+## Piezo bring-up — Stufe 1 and 2
+
+The piezo path is in bench testing, ahead of the PlatformIO firmware. Two stages,
+each with a gate that decides whether the next one happens:
+
+| Stage | Question | Effort | Gate |
+| ----- | -------- | ------ | ---- |
+| 1 | Does the piezo hear the ball, and does it separate from bat clatter? | An evening | Weakest real bounce ≥ 2× the strongest disturbance (peak, or rise time) |
+| 2 | Does the counting logic get a real game right enough? | A week | Under ~1 correction per game |
+
+Both stages run as standalone Arduino IDE sketches, not as PlatformIO
+environments — they are a test rig, deliberately outside the ESP-NOW
+architecture. Stage 2 in particular opens its own access point and serves the
+scoreboard itself, so it can be tuned mid-game without reflashing. That is a
+measurement shortcut, not a second path to the API: the field devices still
+report over ESP-NOW to the hub as in [ADR-0001](docs/adr/0001-esp-now-to-a-hub.md).
+
+- Step-by-step build and measurement guide, macOS and Ubuntu:
+  [docs/piezo-stufe-1-2.md](docs/piezo-stufe-1-2.md) — with breadboard drawings
+  for [channel A](docs/images/piezo-channel-a-breadboard.svg) and
+  [channel B](docs/images/piezo-channel-b-breadboard.svg)
+- [`sketches/stufe1-piezo-test`](sketches/stufe1-piezo-test) — one piezo on
+  GPIO 34, serial plotter plus a CSV event mode (`nr,spitze,anstieg_us,dauer_us,pause_ms`)
+- [`sketches/stufe2-zaehlwerk-mvp`](sketches/stufe2-zaehlwerk-mvp) — two piezos
+  (GPIO 34/35), full counting logic, scoreboard on `http://192.168.4.1`
+
+Sensing runs as its own task pinned to core 0 in stage 2; the web server on core
+1 would otherwise swallow bounces. Keep that split.
+
 ## Status
 
-Early. Start with `button` and `hub` — that is the path to a working scoreboard.
-`piezo` comes once the sensing actually works.
+Early. `button` and `hub` are the path to a working scoreboard and are still
+unwritten. `piezo` is being characterised on the bench first — see the stage
+gates above; the firmware environment follows once the sensing is proven.
