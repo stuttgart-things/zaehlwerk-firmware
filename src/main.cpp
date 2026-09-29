@@ -446,23 +446,6 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   <div class="seq" id="sq"></div>
 </div>
 
-<div class="card"><h2>Spieler</h2>
-  <div class="net">
-    <label style="margin:0">Haelfte A <span class="val" id="hl">(links am Board)</span></label>
-    <input type="text" id="pa" autocomplete="off" placeholder="Name, im Doppel beide">
-    <label style="margin:0">Haelfte B</label>
-    <input type="text" id="pb" autocomplete="off" placeholder="Name, im Doppel beide">
-    <div class="tags" id="zuletzt"></div>
-    <button onclick="spielerSpeichern()">Namen uebernehmen</button>
-    <div class="msg" id="pm">Ohne Namen bleibt alles bei A und B.</div>
-  </div>
-  <div class="row ends">
-    <button class="warn" onclick="seiten()">Seiten wechseln</button>
-  </div>
-  <div class="msg" id="sm">Nach jedem Satz. Wird das vergessen, wandern alle
-    weiteren Punkte auf die falsche Person.</div>
-</div>
-
 <div class="card"><h2>Korrektur</h2>
   <div class="tags">
     <div class="tag" data-v="missed"      onclick="marke('missed')">nicht erkannt</div>
@@ -482,6 +465,23 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   <div class="row" style="margin-top:8px">
     <button class="warn" onclick="go('/zurueck')">Letzten zurück</button>
     <button onclick="go('/neu')">Neues Spiel</button>
+  </div>
+  <div class="row ends">
+    <button class="warn" onclick="seiten()">Seiten wechseln</button>
+  </div>
+  <div class="msg" id="sm">Seiten nach jedem Satz. Wird das vergessen, wandern
+    alle weiteren Punkte auf die falsche Person.</div>
+</div>
+
+<div class="card"><h2>Spieler</h2>
+  <div class="net">
+    <label style="margin:0">Haelfte A</label>
+    <input type="text" id="pa" autocomplete="off" placeholder="Name, im Doppel beide">
+    <label style="margin:0">Haelfte B</label>
+    <input type="text" id="pb" autocomplete="off" placeholder="Name, im Doppel beide">
+    <div class="tags" id="zuletzt"></div>
+    <button onclick="spielerSpeichern()">Namen uebernehmen</button>
+    <div class="msg" id="pm">Ohne Namen bleibt alles bei A und B.</div>
   </div>
 </div>
 
