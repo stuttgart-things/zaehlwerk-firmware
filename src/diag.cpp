@@ -120,6 +120,10 @@ void emitHit(const Hit &h) {
        ",\"cross_b_us\":" + String(h.crossBUs);
   f += ",\"ratio\":" + String(h.ratio, 3);
   f += ",\"counted\":" + String(h.counted ? "true" : "false");
+  if (h.intendedSide && h.intendedType) {
+    f += String(",\"intended\":{\"side\":\"") + h.intendedSide +
+         "\",\"type\":\"" + h.intendedType + "\"}";
+  }
   f += samplesJson(h);
   emit(s, head("hit", s, h.tUs) + f + "}");
 }
@@ -183,6 +187,18 @@ void begin(const Config &cfg) {
 }
 
 void restate() { sayHello(); }
+
+void newSession(const char *sensor, const char *reason) {
+  uint8_t mac[6] = {0};
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  snprintf(sessionId_, sizeof(sessionId_), "%02x%02x%04x", mac[4], mac[5],
+           (uint16_t)(esp_random() & 0xffff));
+  seq_ = 0;
+  cfg_.sensor = sensor;
+  cfg_.reason = reason;
+  Serial.printf("[diag] new session %s (%s, %s)\n", sessionId_, sensor, reason);
+  sayHello();
+}
 
 void tick() {
   if (!queue_) return;

@@ -47,6 +47,10 @@ struct Hit {
   // ambiguous one still counts today the way it always has — changing that
   // belongs in the change that fixes detection, not in the one that measures it.
   bool counted;
+  // What a generated hit was meant to be. Empty on a real one. This is what
+  // lets the sink score detection without anybody labelling anything.
+  char intendedSide;      // 'A', 'B' or 0
+  const char *intendedType;  // "bounce" | "weak" | "ghost" | "net" | 0
   uint32_t tUs;
   uint16_t sampleCount;
   uint32_t preUs;
@@ -70,6 +74,11 @@ void begin(const Config &cfg);
 // no parameters at all, and a session with no parameters cannot be compared
 // with another one.
 void restate();
+
+// A new session id and a fresh session event. Switching the sensor source ends
+// the run that was going and starts another: mixing readings from a generator
+// and from a table in one file would make every number in it unreadable.
+void newSession(const char *sensor, const char *reason);
 
 // Drains the queue and sends. Belongs next to the web server, never in the
 // sampler.

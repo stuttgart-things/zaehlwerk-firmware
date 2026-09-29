@@ -41,6 +41,7 @@
 #include "config.h"
 #include "diag.h"
 #include "game.h"
+#include "mock.h"
 #include "net.h"
 #include "ota.h"
 #include "version.h"
@@ -104,8 +105,9 @@ void sensorTask(void *) {
     sensorTicks++;
 
     const uint32_t jetztUs = micros();
-    int a = analogRead(PIN_A);
-    int b = analogRead(PIN_B);
+    const bool ausMock = mock::on();
+    int a = ausMock ? mock::read(true, jetztUs)  : analogRead(PIN_A);
+    int b = ausMock ? mock::read(false, jetztUs) : analogRead(PIN_B);
 
     vorlauf[vorlaufKopf] = { (uint16_t)(jetztUs & 0xffff), (int16_t)a, (int16_t)b };
     vorlaufKopf = (vorlaufKopf + 1) % diag::PRE_SAMPLES;
@@ -133,6 +135,8 @@ void sensorTask(void *) {
       h.rallyId = rallyId;
       h.side = ' ';
       h.decision = sperre ? diag::Decision::Deadtime : diag::Decision::BelowThreshold;
+      h.intendedSide = mock::intendedSide();
+      h.intendedType = mock::intendedType();
       h.peakA = a; h.peakB = b;
       h.baselineA = baselineA; h.baselineB = baselineB;
       h.crossAUs = a >= logSchwelleA ? 0 : -1;
@@ -167,8 +171,10 @@ void sensorTask(void *) {
       int32_t kreuzB = b >= schwelleB ? 0 : -1;
       while (millis() - start < (uint32_t)FENSTER_MS) {
         uint32_t tUs = micros();
-        int va = analogRead(PIN_A); if (va > spA) spA = va;
-        int vb = analogRead(PIN_B); if (vb > spB) spB = vb;
+        int va = ausMock ? mock::read(true, tUs)  : analogRead(PIN_A);
+        int vb = ausMock ? mock::read(false, tUs) : analogRead(PIN_B);
+        if (va > spA) spA = va;
+        if (vb > spB) spB = vb;
         if (kreuzA < 0 && va >= schwelleA) kreuzA = (int32_t)(tUs - jetztUs);
         if (kreuzB < 0 && vb >= schwelleB) kreuzB = (int32_t)(tUs - jetztUs);
         if (n < diag::CAPTURE_SAMPLES) {
@@ -196,6 +202,8 @@ void sensorTask(void *) {
       h.rallyId = rallyId;
       h.side = t.seite;
       h.decision = eindeutig ? diag::Decision::Counted : diag::Decision::Ambiguous;
+      h.intendedSide = mock::intendedSide();
+      h.intendedType = mock::intendedType();
       h.peakA = spA; h.peakB = spB;
       h.baselineA = baselineA; h.baselineB = baselineB;
       h.crossAUs = kreuzA; h.crossBUs = kreuzB;
@@ -391,6 +399,11 @@ body{background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system
 .wrap{max-width:520px;margin:0 auto}
 .board{background:#12171D;border-radius:10px;padding:22px 18px;text-align:center}
 .score{font:700 74px/1 ui-monospace,Menlo,monospace;color:#F5F7F9;letter-spacing:2px}
+.mock{display:none;background:var(--orange);color:#fff;border-radius:8px;
+padding:10px 14px;margin-bottom:12px;font:700 13px inherit;letter-spacing:.04em;
+text-align:center}
+.mock.on{display:block}
+.mock small{display:block;font-weight:400;letter-spacing:0;opacity:.9;margin-top:2px}
 .who{display:flex;justify-content:space-between;font:600 13px inherit;
 color:#9AA7B4;margin-bottom:4px;gap:12px}
 .who span{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -437,6 +450,10 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 .ni b{color:var(--ink)}
 .ni .warn{color:var(--orange)}
 </style></head><body><div class="wrap">
+
+<div class="mock" id="mb">MOCK &mdash; die Treffer sind erfunden
+  <small>Kein Piezo, kein Ball. Sitzungen aus diesem Modus tragen
+  <code>sensor: mock</code>.</small></div>
 
 <div class="board">
   <div class="who"><span id="wa">A</span><span id="wb">B</span></div>
@@ -495,6 +512,31 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 </div>
 
 <div class="card"><h2>Protokoll</h2><div id="lg"></div></div>
+
+<div class="card"><h2>Mock</h2>
+  <div class="row">
+    <button id="mq" onclick="quelle()">Auf Mock umschalten</button>
+  </div>
+  <div class="msg" id="mm">Umschalten beendet die laufende Sitzung und beginnt eine neue.</div>
+  <div id="mt" style="display:none">
+    <div class="row" style="margin-top:4px">
+      <button onclick="mtrig('hit','A')">Treffer A</button>
+      <button onclick="mtrig('hit','B')">Treffer B</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button onclick="mtrig('weak','A')">schwach A</button>
+      <button onclick="mtrig('weak','B')">schwach B</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button onclick="mtrig('ghost','A')">Geistertreffer</button>
+      <button onclick="mtrig('net','A')">Netzball</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button onclick="mtrig('rally','A')">Rallye abspielen</button>
+      <button id="ma" class="warn" onclick="autoplay()">Autoplay an</button>
+    </div>
+  </div>
+</div>
 
 <div class="card"><h2>Diagnose</h2>
   <div class="ni" id="di">…</div>
@@ -580,6 +622,7 @@ function tick(){
     sv.textContent=d.over?'Spiel beendet':'Aufschlag '+(d.serve=='A'?d.na:d.nb);
     wn.textContent=d.over?('Sieger: '+(d.winner=='A'?d.na:d.nb)):'';
     bpa.textContent='Punkt '+d.na; bpb.textContent='Punkt '+d.nb;
+    if(d.mock!==mockAn || d.auto!==autoAn) mockZeigen(d);
     sq.innerHTML=[...d.rally].map(c=>`<div class="chip${c=='B'?' b':''}">${c}</div>`).join('');
     lg.innerHTML=d.log.length?d.log.map(e=>
       `<div class="entry${e.h?' w':''}"><div class="f">${[...e.f].join(' → ')}</div>
@@ -643,6 +686,29 @@ function seiten(){
     pa.value=''; pb.value='';
     spielerLaden(); tick();
   }).catch(()=>{});
+}
+let mockAn=false, autoAn=false;
+function mockZeigen(d){
+  mockAn=d.mock; autoAn=d.auto;
+  mb.classList.toggle('on', mockAn);
+  mt.style.display = mockAn ? 'block' : 'none';
+  mq.textContent = mockAn ? 'Zurueck auf echtes Spiel' : 'Auf Mock umschalten';
+  ma.textContent = autoAn ? 'Autoplay aus' : 'Autoplay an';
+}
+function mtrig(t,s){halt=Date.now()+300;
+  fetch('/mock?t='+t+'&s='+s).then(r=>r.json()).then(mockZeigen).catch(()=>{})}
+function quelle(){
+  halt=Date.now()+1200;
+  fetch('/mock?t='+(mockAn?'off':'on')).then(r=>r.json()).then(d=>{
+    mockZeigen(d);
+    mm.textContent = d.mock ? 'Mock laeuft. Neue Sitzung begonnen.'
+                            : 'Echtes Spiel. Neue Sitzung begonnen.';
+    tick();
+  }).catch(()=>{});
+}
+function autoplay(){
+  halt=Date.now()+300;
+  fetch('/mock?t=auto&on='+(autoAn?0:1)).then(r=>r.json()).then(mockZeigen).catch(()=>{});
 }
 function netLaden(){
   fetch('/net').then(r=>r.json()).then(n=>{
@@ -710,6 +776,8 @@ void handleState() {
   j += ",\"nb\":\"" + jsonEscape(nameFuer('B')) + "\"";
   j += ",\"named\":" + String(habenNamen() ? "true" : "false");
   j += ",\"satz\":" + String(satzNummer);
+  j += ",\"mock\":" + String(mock::on() ? "true" : "false");
+  j += ",\"auto\":" + String(mock::autoplay() ? "true" : "false");
   j += ",\"img\":\"" + String(ota::imageState()) + "\"";
   j += ",\"up\":" + String(ota::progress());
   j += ",\"log\":[";
@@ -801,6 +869,12 @@ void setup() {
   Serial.printf("\nZaehlwerk %s  git %s\n", ZW_FW_VERSION, ZW_GIT_HASH);
   Serial.println("Start Game");
 
+#ifdef DEFAULT_MOCK
+  mock::begin(true);
+#else
+  mock::begin(false);
+#endif
+
   queue = xQueueCreate(16, sizeof(Treffer));
   xTaskCreatePinnedToCore(sensorTask, "sensor", 4096, NULL, 3, &sensorTaskHandle, 0);
 
@@ -867,6 +941,38 @@ void setup() {
     server.send(200, "application/json", j);
   });
 
+  // The mock is not a switch tucked away somewhere. A board in mock mode that
+  // looks like a board at a table is how a made-up session gets read as a real
+  // one — hence the banner, and hence switching it starts a new session rather
+  // than continuing the one that was going.
+  server.on("/mock", []{
+    const String t = server.arg("t");
+    if (t == "on" || t == "off") {
+      const bool an = (t == "on");
+      if (an != mock::on()) {
+        samplingAnhalten();
+        mock::setOn(an);
+        neuesSpiel();
+        diag::newSession(an ? "mock" : "adc", "mode_switch");
+        samplingFortsetzen();
+      }
+    } else if (t == "rally") {
+      mock::playRally();
+    } else if (t == "auto") {
+      mock::setAutoplay(server.arg("on") != "0");
+    } else if (t.length()) {
+      const char s = server.arg("s") == "B" ? 'B' : 'A';
+      mock::Kind k = mock::Kind::Bounce;
+      if (t == "weak")  k = mock::Kind::Weak;
+      if (t == "ghost") k = mock::Kind::Ghost;
+      if (t == "net")   k = mock::Kind::Net;
+      mock::trigger(k, s);
+    }
+    server.send(200, "application/json",
+                String("{\"mock\":") + (mock::on() ? "true" : "false") +
+                ",\"auto\":" + (mock::autoplay() ? "true" : "false") + "}");
+  });
+
   server.on("/seiten", []{
     seitenWechseln();
     server.send(200, "text/plain", "ok");
@@ -890,7 +996,8 @@ void setup() {
 
   // Last, so the session event carries a network that is already up and the
   // parameters as they actually stand.
-  diag::begin({ ZW_DEVICE_ID, "adc", parameterJson(), "boot", parameterJson });
+  diag::begin({ ZW_DEVICE_ID, mock::on() ? "mock" : "adc", parameterJson(),
+                "boot", parameterJson });
   diag::match("start", spieler[0], spieler[1],
               seiteZuSpieler[0], seiteZuSpieler[1], satzNummer);
 }
@@ -908,6 +1015,7 @@ bool startWarSauber() {
 void loop() {
   server.handleClient();
   net::tick();
+  mock::tick();
   diag::tick();
   ota::handle();
   ota::tick(startWarSauber());
