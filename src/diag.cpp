@@ -1,0 +1,268 @@
+#include "diag.h"
+
+#include <Preferences.h>
+#include <WiFiUdp.h>
+#include <esp_mac.h>
+#include <esp_random.h>
+
+#include "version.h"
+
+namespace diag {
+namespace {
+
+const char *NVS_NAMESPACE = "zaehlwerk";
+const char *KEY_HOST = "sink_host";
+const char *KEY_PORT = "sink_port";
+const char *KEY_ON = "sink_on";
+
+// Stay under a plain ethernet MTU so nothing fragments on the way. A hit with
+// its samples is several times this, which is what chunking is for.
+const size_t MAX_PAYLOAD = 1200;
+const size_t CHUNK_BODY = 900;  // room for the envelope around each fragment
+
+// Four is enough: hits arrive a few times a second and the drain runs every
+// loop. Each one is the better part of two kilobytes, so depth is not free.
+const int QUEUE_DEPTH = 4;
+
+WiFiUDP udp;
+QueueHandle_t queue_ = nullptr;
+
+char sessionId_[9] = "00000000";
+uint32_t seq_ = 0;
+uint32_t dropped_ = 0;
+String host_;
+uint16_t port_ = 9000;
+bool on_ = false;
+String deviceId_;
+
+String esc(const String &in) {
+  String out;
+  out.reserve(in.length() + 8);
+  for (size_t i = 0; i < in.length(); i++) {
+    char c = in[i];
+    if (c == '"' || c == '\\') { out += '\\'; out += c; }
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') out += "\\r";
+    else if ((uint8_t)c < 0x20) continue;
+    else out += c;
+  }
+  return out;
+}
+
+bool sendable() { return on_ && host_.length() > 0; }
+
+void transmit(const String &payload) {
+  IPAddress ip;
+  if (!ip.fromString(host_)) return;  // a name would need a lookup; not here
+  udp.beginPacket(ip, port_);
+  udp.write((const uint8_t *)payload.c_str(), payload.length());
+  udp.endPacket();
+}
+
+// One event out. Small ones go whole; large ones are split as a *string* and
+// the sink joins the parts before parsing — chunks are not documents of their
+// own, which keeps reassembly from needing a parser that tolerates halves.
+void emit(uint32_t seq, const String &body) {
+  if (!sendable()) return;
+
+  if (body.length() <= MAX_PAYLOAD) {
+    transmit(body);
+    return;
+  }
+  const size_t n = (body.length() + CHUNK_BODY - 1) / CHUNK_BODY;
+  for (size_t i = 0; i < n; i++) {
+    String part = body.substring(i * CHUNK_BODY,
+                                 min(body.length(), (i + 1) * CHUNK_BODY));
+    String wrap = String("{\"v\":1,\"session_id\":\"") + sessionId_ +
+                  "\",\"seq\":" + seq + ",\"chunk\":{\"i\":" + i + ",\"n\":" + n +
+                  "},\"part\":\"" + esc(part) + "\"}";
+    transmit(wrap);
+  }
+}
+
+// Every event carries the same head. seq is gapless within a session and is the
+// only way loss is detectable, since UDP has no retry here.
+String head(const char *type, uint32_t seq, uint32_t tUs) {
+  return String("{\"v\":1,\"session_id\":\"") + sessionId_ + "\",\"seq\":" + seq +
+         ",\"id\":\"" + sessionId_ + "-" + seq + "\",\"t_us\":" + tUs +
+         ",\"type\":\"" + type + "\"";
+}
+
+void emitNow(const char *type, const String &fields) {
+  uint32_t s = seq_++;
+  emit(s, head(type, s, (uint32_t)micros()) + fields + "}");
+}
+
+String samplesJson(const Hit &h) {
+  String a = "[", b = "[", t = "[";
+  for (uint16_t i = 0; i < h.sampleCount; i++) {
+    if (i) { a += ','; b += ','; t += ','; }
+    a += h.samples[i].a;
+    b += h.samples[i].b;
+    t += h.samples[i].dtUs;
+  }
+  a += ']'; b += ']'; t += ']';
+  return String(",\"samples\":{\"pre_us\":") + h.preUs + ",\"n\":" + h.sampleCount +
+         ",\"t_us\":" + t + ",\"a\":" + a + ",\"b\":" + b + "}";
+}
+
+void emitHit(const Hit &h) {
+  uint32_t s = seq_++;
+  String f = String(",\"rally_id\":\"") + sessionId_ + "-r" + h.rallyId + "\"";
+  f += ",\"side\":";
+  if (h.side == 'A' || h.side == 'B') f += String("\"") + h.side + "\"";
+  else f += "null";
+  f += String(",\"decision\":\"") + decisionName(h.decision) + "\"";
+  f += ",\"peak_a\":" + String(h.peakA) + ",\"peak_b\":" + String(h.peakB);
+  f += ",\"baseline_a\":" + String(h.baselineA) +
+       ",\"baseline_b\":" + String(h.baselineB);
+  f += ",\"cross_a_us\":" + String(h.crossAUs) +
+       ",\"cross_b_us\":" + String(h.crossBUs);
+  f += ",\"ratio\":" + String(h.ratio, 3);
+  f += ",\"counted\":" + String(h.counted ? "true" : "false");
+  f += samplesJson(h);
+  emit(s, head("hit", s, h.tUs) + f + "}");
+}
+
+}  // namespace
+
+const char *decisionName(Decision d) {
+  switch (d) {
+    case Decision::Counted:        return "counted";
+    case Decision::BelowThreshold: return "below_threshold";
+    case Decision::Deadtime:       return "deadtime";
+    default:                       return "ambiguous";
+  }
+}
+
+// Kept so the session event can be stated again later, when somebody points the
+// sink at a different machine mid-session.
+Config cfg_{};
+String (*parameters_)() = nullptr;
+
+void sayHello() {
+  String f = String(",\"device_id\":\"") + esc(deviceId_) + "\"";
+  f += String(",\"fw_version\":\"") + ZW_FW_VERSION + "\"";
+  f += String(",\"git_hash\":\"") + ZW_GIT_HASH + "\"";
+  f += String(",\"sensor\":\"") + cfg_.sensor + "\"";
+  f += String(",\"reason\":\"") + cfg_.reason + "\"";
+  f += ",\"params\":" + (parameters_ ? parameters_() : cfg_.paramsJson);
+  uint32_t s = seq_++;
+  emit(s, head("session", s, (uint32_t)micros()) + f + "}");
+}
+
+void begin(const Config &cfg) {
+  deviceId_ = cfg.deviceId;
+  cfg_ = cfg;
+  parameters_ = cfg.parameters;
+
+  Preferences prefs;
+  prefs.begin(NVS_NAMESPACE, false);
+  host_ = prefs.isKey(KEY_HOST) ? prefs.getString(KEY_HOST, "") : String();
+  port_ = prefs.isKey(KEY_PORT) ? prefs.getUShort(KEY_PORT, 9000) : 9000;
+  on_ = prefs.isKey(KEY_ON) ? prefs.getBool(KEY_ON, true) : true;
+  prefs.end();
+
+  // Built from the chip and the boot time, so two sessions from one board are
+  // still distinguishable after a restart.
+  uint8_t mac[6] = {0};
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  snprintf(sessionId_, sizeof(sessionId_), "%02x%02x%04x", mac[4], mac[5],
+           (uint16_t)(esp_random() & 0xffff));
+
+  queue_ = xQueueCreate(QUEUE_DEPTH, sizeof(Hit));
+  udp.begin(0);
+
+  Serial.printf("[diag] session %s, sink %s:%u, %s\n", sessionId_,
+                host_.length() ? host_.c_str() : "(none)", port_,
+                sendable() ? "on" : "off");
+
+  // The only place the build and the parameters are stated in full. Everything
+  // downstream is read against it.
+  sayHello();
+}
+
+void restate() { sayHello(); }
+
+void tick() {
+  if (!queue_) return;
+  static Hit h;
+  while (xQueueReceive(queue_, &h, 0) == pdTRUE) emitHit(h);
+
+  static uint32_t reported = 0;
+  if (dropped_ != reported) {
+    uint32_t lost = dropped_ - reported;
+    reported = dropped_;
+    note("warn", String("log queue full, ") + lost + " events dropped");
+  }
+}
+
+void hit(const Hit &h) {
+  if (!queue_) return;
+  // Never blocks. A full queue costs the event, not the detection.
+  if (xQueueSend(queue_, &h, 0) != pdTRUE) dropped_++;
+}
+
+void rallyStart(uint32_t rallyId) {
+  emitNow("rally", String(",\"rally_id\":\"") + sessionId_ + "-r" + rallyId +
+                       "\",\"phase\":\"start\"");
+}
+
+void rallyEnd(uint32_t rallyId, const String &sequence, const char *closedBy) {
+  emitNow("rally", String(",\"rally_id\":\"") + sessionId_ + "-r" + rallyId +
+                       "\",\"phase\":\"end\",\"sequence\":\"" + esc(sequence) +
+                       "\",\"closed_by\":\"" + closedBy + "\"");
+}
+
+void point(uint32_t pointId, uint32_t rallyId, const String &reason,
+           const String &hint, char side, int fromA, int fromB, char fromServe,
+           int toA, int toB, char toServe, bool over) {
+  String f = String(",\"point_id\":\"") + sessionId_ + "-p" + pointId + "\"";
+  f += String(",\"rally_id\":\"") + sessionId_ + "-r" + rallyId + "\"";
+  f += ",\"reason\":\"" + esc(reason) + "\"";
+  f += ",\"hint\":\"" + esc(hint) + "\"";
+  f += String(",\"side\":\"") + side + "\"";
+  f += ",\"from\":{\"a\":" + String(fromA) + ",\"b\":" + String(fromB) +
+       ",\"serve\":\"" + String(fromServe) + "\"}";
+  f += ",\"to\":{\"a\":" + String(toA) + ",\"b\":" + String(toB) + ",\"serve\":\"" +
+       String(toServe) + "\",\"over\":" + (over ? "true" : "false") + "}";
+  emitNow("point", f);
+}
+
+void param(const char *name, const String &from, const String &to, const char *by) {
+  emitNow("param", String(",\"name\":\"") + name + "\",\"from\":\"" + esc(from) +
+                       "\",\"to\":\"" + esc(to) + "\",\"by\":\"" + by + "\"");
+}
+
+void note(const char *level, const String &text) {
+  emitNow("note", String(",\"level\":\"") + level + "\",\"text\":\"" + esc(text) + "\"");
+}
+
+void setSink(const String &host, uint16_t port) {
+  host_ = host;
+  port_ = port;
+  if (sendable()) restate();
+  Preferences prefs;
+  prefs.begin(NVS_NAMESPACE, false);
+  prefs.putString(KEY_HOST, host);
+  prefs.putUShort(KEY_PORT, port);
+  prefs.end();
+}
+
+void setEnabled(bool on) {
+  const bool war = sendable();
+  on_ = on;
+  if (sendable() && !war) restate();
+  Preferences prefs;
+  prefs.begin(NVS_NAMESPACE, false);
+  prefs.putBool(KEY_ON, on);
+  prefs.end();
+}
+
+bool enabled() { return sendable(); }
+const String &sinkHost() { return host_; }
+uint16_t sinkPort() { return port_; }
+const char *sessionId() { return sessionId_; }
+uint32_t droppedEvents() { return dropped_; }
+
+}  // namespace diag

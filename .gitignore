@@ -12,6 +12,10 @@ secrets.ini
 .task/
 site/
 
+# Recorded sessions
+sink-data/
+tools/log-sink/sessions/
+
 # Editoren
 .vscode/
 .idea/

@@ -164,6 +164,39 @@ tasks:
     cmds:
       - task: build
       - task: test
+      - task: sink:test
+
+  ## ──────────────────────────────────────────────
+  ## THE LOG SINK
+  ## ──────────────────────────────────────────────
+
+  sink:
+    desc: Receive the diagnostic log and serve the viewer
+    dir: tools/log-sink
+    silent: true
+    cmds:
+      - |
+        gum log --level info "Point the board here: http://{{.ESP_HOST}}/ under Diagnose,"
+        gum log --level info "or curl 'http://{{.ESP_HOST}}/diag?host=<this laptop>&port=9000&on=1'"
+        go run . -dir ../../{{.SINK_DIR | default "sink-data"}}
+
+  sink:test:
+    desc: Tests for the sink
+    dir: tools/log-sink
+    cmds:
+      - go test ./...
+
+  sink:export:
+    desc: Zip one session with a summary — SESSION=sessions/<file>.jsonl
+    dir: tools/log-sink
+    silent: true
+    cmds:
+      - |
+        [ -n "{{.SESSION}}" ] || {
+          gum log --level error "Which session? task sink:export SESSION=path/to.jsonl"
+          exit 1
+        }
+        go run . export "../../{{.SESSION}}"
 
   ## ──────────────────────────────────────────────
   ## ONTO THE BOARD

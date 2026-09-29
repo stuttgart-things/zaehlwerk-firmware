@@ -47,6 +47,12 @@
 #define ZW_OTA_PASS ""
 #endif
 
+// Names this board in the log. Two tables in one sink file are otherwise only
+// distinguishable by their session id, which says nothing to a person.
+#ifndef ZW_DEVICE_ID
+#define ZW_DEVICE_ID "piezo-1"
+#endif
+
 // --- the board's own access point -----------------------------------------
 #ifndef ZW_AP_SSID
 #define ZW_AP_SSID "Zaehlwerk"

@@ -15,6 +15,7 @@ nav:
   - Overview: index.md
   - Flashing and updates: flashing-and-ota.md
   - Event schema: event-schema.md
+  - The log sink: log-sink.md
   - Bench bring-up: piezo-stufe-1-2.md
   - Decisions:
       - 0001 ESP-NOW to a hub: adr/0001-esp-now-to-a-hub.md

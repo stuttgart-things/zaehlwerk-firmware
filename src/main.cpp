@@ -38,6 +38,7 @@
 #include <string>
 
 #include "config.h"
+#include "diag.h"
 #include "game.h"
 #include "net.h"
 #include "ota.h"
@@ -53,6 +54,16 @@ volatile int schwelleA   = 300;
 volatile int schwelleB   = 300;
 volatile int rallyTimeout = 1500;   // ms Stille = Ballwechsel vorbei
 
+// Everything above log_threshold is written to the log, whether or not it
+// counts. Below the counting threshold on purpose: the crossings that were
+// thrown away are the half the scoreboard never mentions.
+volatile int logSchwelleA = 120;
+volatile int logSchwelleB = 120;
+
+// How much louder one channel has to be before the side is more than a guess.
+// It classifies today, it does not yet decide — see diag::Hit::counted.
+volatile int clearRatioPromille = 1800;
+
 const int SPERRE_MS  = 60;          // Nachklingen
 const int FENSTER_MS = 30;          // Vergleichsfenster zwischen den Kanälen
 
@@ -67,6 +78,22 @@ QueueHandle_t queue;
 TaskHandle_t sensorTaskHandle = nullptr;
 volatile uint32_t sensorTicks = 0;
 
+// The quiet level of each channel, tracked while nothing is happening. A peak
+// means little without it — the channels sit at different levels and drift.
+volatile int baselineA = 0, baselineB = 0;
+
+// Ids. Every hit belongs to a rally, every point to the rally it ended, so a
+// correction later can point at one thing rather than at a span of time.
+uint32_t rallyId = 0, pointId = 0;
+bool rallyOffen = false;
+
+// The pre-trigger ring: what the sampler managed to take before the crossing.
+// At one sample per millisecond that is not a curve yet; #10 is what makes it
+// one. The shape is right either way, so the sink does not change with it.
+diag::Sample vorlauf[diag::PRE_SAMPLES];
+size_t vorlaufKopf = 0;
+uint32_t vorlaufFuell = 0;
+
 void sensorTask(void *) {
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
@@ -74,19 +101,80 @@ void sensorTask(void *) {
 
   for (;;) {
     sensorTicks++;
-    if (millis() < sperreBis) { vTaskDelay(1); continue; }
 
+    const uint32_t jetztUs = micros();
     int a = analogRead(PIN_A);
     int b = analogRead(PIN_B);
 
-    if (a >= schwelleA || b >= schwelleB) {
-      // Follow both channels for FENSTER_MS and collect the peaks.
+    vorlauf[vorlaufKopf] = { (uint16_t)(jetztUs & 0xffff), (int16_t)a, (int16_t)b };
+    vorlaufKopf = (vorlaufKopf + 1) % diag::PRE_SAMPLES;
+    vorlaufFuell++;
+
+    const bool sperre = millis() < sperreBis;
+    const bool uebertritt = (a >= logSchwelleA || b >= logSchwelleB);
+
+    if (!uebertritt) {
+      // Quiet: let the baselines follow, slowly enough that a hit does not
+      // drag them along.
+      baselineA += (a - baselineA) / 64;
+      baselineB += (b - baselineB) / 64;
+      vTaskDelay(1);
+      continue;
+    }
+
+    const bool zaehlt = !sperre && (a >= schwelleA || b >= schwelleB);
+
+    if (!zaehlt) {
+      // Logged, but nothing else changes. No peak window here on purpose: it
+      // would cost thirty milliseconds of blindness that the old code did not
+      // spend, and this change is meant to measure detection, not alter it.
+      diag::Hit h{};
+      h.rallyId = rallyId;
+      h.side = ' ';
+      h.decision = sperre ? diag::Decision::Deadtime : diag::Decision::BelowThreshold;
+      h.peakA = a; h.peakB = b;
+      h.baselineA = baselineA; h.baselineB = baselineB;
+      h.crossAUs = a >= logSchwelleA ? 0 : -1;
+      h.crossBUs = b >= logSchwelleB ? 0 : -1;
+      h.ratio = 0;
+      h.counted = false;
+      h.tUs = jetztUs;
+      h.preUs = 0;
+      h.sampleCount = 0;
+      diag::hit(h);
+      vTaskDelay(1);
+      continue;
+    }
+
+    {
+      // Follow both channels for FENSTER_MS and collect the peaks. The samples
+      // are recorded on the way past — the loop is unchanged otherwise.
+      diag::Hit h{};
+      uint16_t n = 0;
+      for (size_t i = 0; i < diag::PRE_SAMPLES && n < diag::CAPTURE_SAMPLES; i++) {
+        size_t k = (vorlaufKopf + i) % diag::PRE_SAMPLES;
+        if (vorlaufFuell < diag::PRE_SAMPLES && k >= vorlaufFuell) continue;
+        h.samples[n] = vorlauf[k];
+        h.samples[n].dtUs = 0;  // filled in below, once t0 is known
+        n++;
+      }
+      const uint16_t vorlaufAnzahl = n;
+
       uint32_t start = millis();
       int spA = a, spB = b;
+      int32_t kreuzA = a >= schwelleA ? 0 : -1;
+      int32_t kreuzB = b >= schwelleB ? 0 : -1;
       while (millis() - start < (uint32_t)FENSTER_MS) {
+        uint32_t tUs = micros();
         int va = analogRead(PIN_A); if (va > spA) spA = va;
         int vb = analogRead(PIN_B); if (vb > spB) spB = vb;
+        if (kreuzA < 0 && va >= schwelleA) kreuzA = (int32_t)(tUs - jetztUs);
+        if (kreuzB < 0 && vb >= schwelleB) kreuzB = (int32_t)(tUs - jetztUs);
+        if (n < diag::CAPTURE_SAMPLES) {
+          h.samples[n++] = { (uint16_t)(tUs - jetztUs), (int16_t)va, (int16_t)vb };
+        }
       }
+      for (uint16_t i = 0; i < vorlaufAnzahl; i++) h.samples[i].dtUs = 0;
 
       // Compare against each channel's own threshold — the two are never
       // exactly equally sensitive.
@@ -99,6 +187,23 @@ void sensorTask(void *) {
       t.spitzeB = spB;
       if (relA >= relB) { t.seite = 'A'; }
       else              { t.seite = 'B'; }
+
+      const float gross = max(relA, relB), klein = min(relA, relB);
+      const float verhaeltnis = klein > 0 ? gross / klein : 999.0f;
+      const bool eindeutig = verhaeltnis * 1000.0f >= (float)clearRatioPromille;
+
+      h.rallyId = rallyId;
+      h.side = t.seite;
+      h.decision = eindeutig ? diag::Decision::Counted : diag::Decision::Ambiguous;
+      h.peakA = spA; h.peakB = spB;
+      h.baselineA = baselineA; h.baselineB = baselineB;
+      h.crossAUs = kreuzA; h.crossBUs = kreuzB;
+      h.ratio = verhaeltnis;
+      h.counted = true;   // unchanged: the louder channel wins, clear or not
+      h.tUs = jetztUs;
+      h.preUs = 0;
+      h.sampleCount = n;
+      diag::hit(h);
 
       xQueueSend(queue, &t, 0);
       sperreBis = millis() + SPERRE_MS;
@@ -142,11 +247,17 @@ void logEintragen(String folge, String urteil, String hinweis) {
   log_[logAnzahl++] = { folge, urteil, hinweis };
 }
 
-void punktGeben(char gewinner, String folge, String hinweis) {
+void punktGeben(char gewinner, String folge, String hinweis, const char *grund) {
+  const int vorA = punkteA, vorB = punkteB;
+  const char vorAufschlag = aufschlag;
+
   if (gewinner == 'A') punkteA++; else punkteB++;
   if (game::beendet(punkteA, punkteB)) { vorbei = true; sieger = gewinner; }
   else aufschlag = game::aufschlagFuer(punkteA, punkteB, ersterAufschlag);
   logEintragen(folge, String("Punkt fuer ") + gewinner, hinweis);
+
+  diag::point(++pointId, rallyId, grund, hinweis, gewinner,
+              vorA, vorB, vorAufschlag, punkteA, punkteB, aufschlag, vorbei);
 }
 
 void rallyBeenden() {
@@ -154,17 +265,24 @@ void rallyBeenden() {
   String folge = rally;
   rally = "";
 
+  diag::rallyEnd(rallyId, folge, "timeout");
+  rallyOffen = false;
+
   game::Urteil u = game::rallyBewerten(std::string(folge.c_str()), aufschlag);
-  punktGeben(u.gewinner, folge, String(u.hinweis.c_str()));
+  punktGeben(u.gewinner, folge, String(u.hinweis.c_str()), u.grund);
 }
 
 void zurueck() {
   if (verlaufN == 0) return;
+  const int vorA = punkteA, vorB = punkteB;
+  const char vorAufschlag = aufschlag;
   Snapshot s = verlauf[--verlaufN];
   punkteA = s.a; punkteB = s.b; ersterAufschlag = s.erst;
   aufschlag = s.auf; vorbei = s.ende; sieger = s.sieg;
   logAnzahl = s.logN;
   rally = "";
+  diag::point(++pointId, rallyId, "undo", "", ' ',
+              vorA, vorB, vorAufschlag, punkteA, punkteB, aufschlag, vorbei);
 }
 
 void neuesSpiel() {
@@ -252,6 +370,21 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 
 <div class="card"><h2>Protokoll</h2><div id="lg"></div></div>
 
+<div class="card"><h2>Diagnose</h2>
+  <div class="ni" id="di">…</div>
+  <div class="net" style="margin-top:10px">
+    <label style="margin:0">Sink-Adresse (IP des Laptops)</label>
+    <input type="text" id="dh" autocomplete="off" placeholder="192.168.178.188">
+    <label style="margin:0">Port</label>
+    <input type="text" id="dp" autocomplete="off" placeholder="9000">
+    <div class="row">
+      <button onclick="diagSpeichern(1)">Speichern und an</button>
+      <button class="warn" onclick="diagSpeichern(0)">Aus</button>
+    </div>
+    <div class="msg" id="dm"></div>
+  </div>
+</div>
+
 <div class="card"><h2>Netz</h2>
   <div class="ni" id="ni">…</div>
   <div class="net" style="margin-top:10px">
@@ -315,6 +448,25 @@ function tick(){
   }).catch(()=>{});
 }
 setInterval(tick,400);tick();
+function diagZeigen(d){
+  di.innerHTML = (d.on?'Sendet an <b>'+d.host+':'+d.port+'</b>'
+                      :'<span class="warn">Aus</span> &mdash; ohne Sink-Adresse wird nichts protokolliert')
+    + '<br>Sitzung <b>'+d.session+'</b>'
+    + (d.dropped?'<br><span class="warn">'+d.dropped+' Ereignisse verworfen</span>':'');
+  if(!dh.value && d.host)dh.value=d.host;
+  if(!dp.value)dp.value=d.port;
+}
+function diagLaden(){fetch('/diag').then(r=>r.json()).then(diagZeigen).catch(()=>{})}
+function diagSpeichern(on){
+  const q=new URLSearchParams({on:on});
+  if(dh.value)q.set('host',dh.value);
+  if(dp.value)q.set('port',dp.value);
+  halt=Date.now()+400;
+  fetch('/diag?'+q).then(r=>r.json()).then(d=>{
+    diagZeigen(d);
+    dm.textContent = d.on?'Laeuft. Auf dem Laptop muss der Sink lauschen.':'Aus.';
+  }).catch(()=>{dm.textContent='Ging nicht.'});
+}
 function netLaden(){
   fetch('/net').then(r=>r.json()).then(n=>{
     ni.innerHTML =
@@ -357,6 +509,8 @@ function senden(){
   x.send(fd);
 }
 netLaden();
+diagLaden();
+setInterval(diagLaden,5000);
 fetch('/version').then(r=>r.json()).then(v=>{
   ver.textContent=v.fw+' \u00b7 '+v.git;
   if(v.dirty)ver.classList.add('dirty');
@@ -407,6 +561,24 @@ void samplingAnhalten() {
 void samplingFortsetzen() {
   if (sensorTaskHandle) vTaskResume(sensorTaskHandle);
   Serial.println("[ota] sampling resumed");
+}
+
+// The whole parameter set, the way the session event carries it. Everything
+// downstream is read against this, so a session with no parameters is a session
+// that cannot be compared with another.
+String parameterJson() {
+  String j = "{";
+  j += "\"threshold_a\":" + String(schwelleA) + ",\"threshold_b\":" + String(schwelleB);
+  j += ",\"log_threshold_a\":" + String(logSchwelleA) +
+       ",\"log_threshold_b\":" + String(logSchwelleB);
+  j += ",\"clear_ratio\":" + String(clearRatioPromille / 1000.0, 3);
+  j += ",\"peak_window_us\":" + String((long)FENSTER_MS * 1000);
+  j += ",\"deadtime_us\":" + String((long)SPERRE_MS * 1000);
+  j += ",\"rally_timeout_ms\":" + String(rallyTimeout);
+  j += ",\"pre_trigger_samples\":" + String((int)diag::PRE_SAMPLES);
+  j += ",\"capture_samples\":" + String((int)diag::CAPTURE_SAMPLES);
+  j += "}";
+  return j;
 }
 
 // What the page needs to say which network the board is on — and the channel,
@@ -463,21 +635,47 @@ void setup() {
   server.on("/punkt", []{
     sichern(); rally = "";
     char s = server.arg("s") == "B" ? 'B' : 'A';
-    punktGeben(s, "", "Manuell vergeben.");
+    punktGeben(s, "", "Manuell vergeben.", "manual");
     server.send(200, "text/plain", "ok");
   });
   server.on("/zurueck", []{ zurueck(); server.send(200, "text/plain", "ok"); });
   server.on("/neu",     []{ neuesSpiel(); server.send(200, "text/plain", "ok"); });
   server.on("/cfg", []{
-    if (server.hasArg("a")) schwelleA    = server.arg("a").toInt();
-    if (server.hasArg("b")) schwelleB    = server.arg("b").toInt();
-    if (server.hasArg("t")) rallyTimeout = server.arg("t").toInt();
+    auto setzen = [](const char *arg, const char *name, volatile int &ziel) {
+      if (!server.hasArg(arg)) return;
+      const int neu = server.arg(arg).toInt();
+      if (neu == ziel) return;
+      diag::param(name, String(ziel), String(neu), "web");
+      ziel = neu;
+    };
+    setzen("a",  "threshold_a",      schwelleA);
+    setzen("b",  "threshold_b",      schwelleB);
+    setzen("t",  "rally_timeout_ms", rallyTimeout);
+    setzen("la", "log_threshold_a",  logSchwelleA);
+    setzen("lb", "log_threshold_b",  logSchwelleB);
+    setzen("cr", "clear_ratio",      clearRatioPromille);
     server.send(200, "text/plain", "ok");
+  });
+
+  server.on("/diag", []{
+    if (server.hasArg("host"))
+      diag::setSink(server.arg("host"),
+                    server.hasArg("port") ? server.arg("port").toInt() : diag::sinkPort());
+    if (server.hasArg("on")) diag::setEnabled(server.arg("on") == "1");
+    String j = String("{\"host\":\"") + diag::sinkHost() + "\",\"port\":" +
+               diag::sinkPort() + ",\"on\":" + (diag::enabled() ? "true" : "false") +
+               ",\"session\":\"" + diag::sessionId() + "\",\"dropped\":" +
+               diag::droppedEvents() + "}";
+    server.send(200, "application/json", j);
   });
   server.begin();
   webserverLaeuft = true;
 
   ota::begin(server, { ZW_HOSTNAME, ZW_OTA_PASS, samplingAnhalten, samplingFortsetzen });
+
+  // Last, so the session event carries a network that is already up and the
+  // parameters as they actually stand.
+  diag::begin({ ZW_DEVICE_ID, "adc", parameterJson(), "boot", parameterJson });
 }
 
 // The verdict on our own start that the rollback listens to. Deliberately more
@@ -493,13 +691,18 @@ bool startWarSauber() {
 void loop() {
   server.handleClient();
   net::tick();
+  diag::tick();
   ota::handle();
   ota::tick(startWarSauber());
 
   Treffer t;
   while (xQueueReceive(queue, &t, 0) == pdTRUE) {
     if (vorbei) continue;
-    if (rally.length() == 0) sichern();
+    if (rally.length() == 0) {
+      sichern();
+      diag::rallyStart(++rallyId);
+      rallyOffen = true;
+    }
     rally += t.seite;
     letzterTreffer = t.t;
     Serial.printf("hit %c    A:%d B:%d\n", t.seite, t.spitzeA, t.spitzeB);

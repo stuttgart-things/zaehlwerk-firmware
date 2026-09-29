@@ -78,6 +78,18 @@ static void a_first_bounce_on_the_wrong_side_is_recorded() {
 static void an_empty_sequence_awards_nothing() {
   game::Urteil u = game::rallyBewerten("", 'A');
   TEST_ASSERT_EQUAL_CHAR(' ', u.gewinner);
+  TEST_ASSERT_EQUAL_STRING("none", u.grund);
+}
+
+// The reason is what the log records, so it has to say which rule fired rather
+// than being derived from the German hint afterwards.
+static void the_reason_names_the_rule_that_decided() {
+  TEST_ASSERT_EQUAL_STRING("last_bounce", game::rallyBewerten("ABAB", 'A').grund);
+  TEST_ASSERT_EQUAL_STRING("single_bounce", game::rallyBewerten("A", 'A').grund);
+  TEST_ASSERT_EQUAL_STRING("double_bounce", game::rallyBewerten("ABAA", 'A').grund);
+  // A first bounce on the wrong side is a hint, not a rule — the last bounce
+  // still decides.
+  TEST_ASSERT_EQUAL_STRING("last_bounce", game::rallyBewerten("BABA", 'A').grund);
 }
 
 // Two bounces in a row on the same half mean the ball did not come back, so the
@@ -122,6 +134,7 @@ int main(int, char **) {
   RUN_TEST(two_bounces_from_the_serve_are_ambiguous);
   RUN_TEST(a_first_bounce_on_the_wrong_side_is_recorded);
   RUN_TEST(an_empty_sequence_awards_nothing);
+  RUN_TEST(the_reason_names_the_rule_that_decided);
   RUN_TEST(a_double_bounce_is_recognised_as_one);
   RUN_TEST(the_point_goes_to_the_side_that_did_not_double_bounce);
   RUN_TEST(a_double_bounce_decides_even_when_play_continued);
