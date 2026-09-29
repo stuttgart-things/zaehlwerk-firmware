@@ -44,6 +44,17 @@ pio device monitor               # 115200 baud
 pio test -e native               # run the rule tests on the laptop
 ```
 
+The version and the short git hash are baked in on every build by
+`scripts/version.py` — never typed into a header. They show on the serial line
+at boot, at `/version`, at the foot of the web UI, and in the `session` event
+once #15 lands, which is what ties an exported session to a commit months
+later.
+
+A build from a working tree with uncommitted changes to tracked files is marked
+`-dirty`, in the version and in the hash. Untracked files do not count; they are
+not in the build. There are no tags yet, so the version reads `0.0.0-dev` until
+something is released.
+
 Both ESP32 environments use `default.csv`, the standard partition table with
 two app slots. Two slots are what makes an over-the-air update and a rollback
 possible at all — do not swap it for a single-slot table to win flash.
