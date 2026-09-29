@@ -225,3 +225,17 @@ func TestTheChunksOfOneEventCountAsOneSequenceNumber(t *testing.T) {
 		t.Errorf("lost = %d, want 0", se.Lost)
 	}
 }
+
+// A crossing that was never counted has no side to be right or wrong about.
+// Counting those dragged a generated run with 15% wrong sides down to 40%.
+func TestMockScoringIgnoresCrossingsThatDecidedNoSide(t *testing.T) {
+	s, _ := newTestSink(t)
+	now := time.Now()
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"hit","side":"A","counted":true,"intended":{"side":"A"}}`), now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":2,"type":"hit","side":null,"decision":"deadtime","counted":false,"intended":{"side":"B"}}`), now)
+
+	sum := s.Sessions()[0].Summary()
+	if sum.Intended != 1 || sum.IntendedRight != 1 || sum.MockAccuracy != 1 {
+		t.Errorf("scored %d of %d (%.2f), want 1 of 1", sum.IntendedRight, sum.Intended, sum.MockAccuracy)
+	}
+}
