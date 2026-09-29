@@ -29,11 +29,12 @@ struct Sample {
   int16_t b;
 };
 
-// Capacities. The pre-trigger holds what the sampler managed to take before the
-// crossing; at one sample per millisecond that is 64 milliseconds of very
-// little, and with #10 it becomes 64 samples of something.
-const size_t PRE_SAMPLES = 64;
-const size_t CAPTURE_SAMPLES = 256;
+// Capacities, sized for the rate the sampler actually reaches rather than for a
+// round number of milliseconds. Recording stops at CAPTURE_SAMPLES while the
+// peak search runs the whole window out: the shape of a bounce is in its first
+// few milliseconds, the tail only matters as a number.
+const size_t PRE_SAMPLES = 128;
+const size_t CAPTURE_SAMPLES = 512;
 
 struct Hit {
   uint32_t rallyId;

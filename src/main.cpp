@@ -23,12 +23,13 @@
   a player reads it. Comments and serial output are English, like the rest of
   the repository.
 
-  How the firmware is laid out:
-    core 0  sensor task, sweeps both channels and reports events
-    core 1  web server and game logic
-  That split matters — otherwise the web server swallows bounces. Note that the
-  sides are the wrong way round and ADR-0003 reverses them: the wifi task lives
-  on core 0 too. Until #10 lands, this is the sketch's arrangement.
+  How the firmware is laid out (ADR-0003):
+    core 1  sensor task, alone, sampling continuously and never yielding
+    core 0  web server, game logic, wifi, logging, OTA
+  The split matters, and so do the sides. The wifi and lwIP tasks live on core 0,
+  so a sampler there shares a core with the radio: on the bench that cost a
+  measured 24 ms gap in the middle of a peak window. Core 1 belongs to the
+  sampler; anything else that wants it has to justify itself.
 */
 
 #include <Arduino.h>
@@ -45,8 +46,6 @@
 #include "version.h"
 
 /* ================= configuration ================= */
-const int  PIN_A = ZW_PIN_A;
-const int  PIN_B = ZW_PIN_B;
 const char *AP_PREFIX = ZW_AP_SSID;   // the chip id is appended, see net.cpp
 const char *AP_PASS   = ZW_AP_PASS;
 
@@ -82,6 +81,12 @@ volatile uint32_t sensorTicks = 0;
 // means little without it — the channels sit at different levels and drift.
 volatile int baselineA = 0, baselineB = 0;
 
+// The last pair the sampler read. Only for looking at: without it the only way
+// to see what the ADC returns is to wait for a crossing, which is no help when
+// the complaint is that there are none.
+volatile int letzteA = 0, letzteB = 0;
+volatile uint32_t abstandUs = 0;   // gap between the last two reads
+
 // Ids. Every hit belongs to a rally, every point to the rally it ended, so a
 // correction later can point at one thing rather than at a span of time.
 uint32_t rallyId = 0, pointId = 0;
@@ -94,17 +99,46 @@ diag::Sample vorlauf[diag::PRE_SAMPLES];
 size_t vorlaufKopf = 0;
 uint32_t vorlaufFuell = 0;
 
+// The hit under construction. It belongs to the sensor task and to nothing
+// else, and it lives here rather than on that task's stack: at 512 samples the
+// struct is over three kilobytes, and a local one overflowed a four kilobyte
+// stack on the first boot after the capture was enlarged. diag::hit copies it
+// into the queue, so reusing the same buffer is safe.
+diag::Hit rohling;
+
+// Both pins are on ADC1. That is a requirement, not a preference: ADC2 is
+// unavailable while wifi is running.
+//
+// The reads go through analogRead rather than adc1_get_raw. The raw call is
+// leaner and was tried here: with the pins attached by the core exactly as
+// analogRead attaches them, it returned zero on both channels for a whole
+// session while the task ticked 158499 times. Something in that path is not
+// the same read, and a fast wrong number is worse than a slow right one.
+// Revisit with a scope, not with a guess.
+
 void sensorTask(void *) {
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
+
+  // No watchdog call here, though a task that never yields looks like it needs
+  // one. The Arduino core ships CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
+  // unset, so core 1's idle task is not watched and there is nothing to
+  // disable: calling disableCore1WDT() only logs "Failed to remove Core 1 IDLE
+  // task from WDT" on every boot. If that config ever changes, this is where
+  // the call goes back.
+
   uint32_t sperreBis = 0;
 
   for (;;) {
     sensorTicks++;
 
     const uint32_t jetztUs = micros();
-    int a = analogRead(PIN_A);
-    int b = analogRead(PIN_B);
+    int a = analogRead(ZW_PIN_A);
+    int b = analogRead(ZW_PIN_B);
+    static uint32_t vorigUs = 0;
+    abstandUs = jetztUs - vorigUs;
+    vorigUs = jetztUs;
+    letzteA = a; letzteB = b;
 
     vorlauf[vorlaufKopf] = { (uint16_t)(jetztUs & 0xffff), (int16_t)a, (int16_t)b };
     vorlaufKopf = (vorlaufKopf + 1) % diag::PRE_SAMPLES;
@@ -116,9 +150,10 @@ void sensorTask(void *) {
     if (!uebertritt) {
       // Quiet: let the baselines follow, slowly enough that a hit does not
       // drag them along.
-      baselineA += (a - baselineA) / 64;
-      baselineB += (b - baselineB) / 64;
-      vTaskDelay(1);
+      // Slow enough that a hit does not drag them along. No delay here: the
+      // loop runs flat out, which is the point of the change.
+      baselineA += (a - baselineA) / 256;
+      baselineB += (b - baselineB) / 256;
       continue;
     }
 
@@ -128,7 +163,7 @@ void sensorTask(void *) {
       // Logged, but nothing else changes. No peak window here on purpose: it
       // would cost thirty milliseconds of blindness that the old code did not
       // spend, and this change is meant to measure detection, not alter it.
-      diag::Hit h{};
+      diag::Hit &h = rohling;
       h.rallyId = rallyId;
       h.side = ' ';
       h.decision = sperre ? diag::Decision::Deadtime : diag::Decision::BelowThreshold;
@@ -142,14 +177,13 @@ void sensorTask(void *) {
       h.preUs = 0;
       h.sampleCount = 0;
       diag::hit(h);
-      vTaskDelay(1);
       continue;
     }
 
     {
       // Follow both channels for FENSTER_MS and collect the peaks. The samples
       // are recorded on the way past — the loop is unchanged otherwise.
-      diag::Hit h{};
+      diag::Hit &h = rohling;
       uint16_t n = 0;
       for (size_t i = 0; i < diag::PRE_SAMPLES && n < diag::CAPTURE_SAMPLES; i++) {
         size_t k = (vorlaufKopf + i) % diag::PRE_SAMPLES;
@@ -166,8 +200,8 @@ void sensorTask(void *) {
       int32_t kreuzB = b >= schwelleB ? 0 : -1;
       while (millis() - start < (uint32_t)FENSTER_MS) {
         uint32_t tUs = micros();
-        int va = analogRead(PIN_A); if (va > spA) spA = va;
-        int vb = analogRead(PIN_B); if (vb > spB) spB = vb;
+        int va = analogRead(ZW_PIN_A); if (va > spA) spA = va;
+        int vb = analogRead(ZW_PIN_B); if (vb > spB) spB = vb;
         if (kreuzA < 0 && va >= schwelleA) kreuzA = (int32_t)(tUs - jetztUs);
         if (kreuzB < 0 && vb >= schwelleB) kreuzB = (int32_t)(tUs - jetztUs);
         if (n < diag::CAPTURE_SAMPLES) {
@@ -208,7 +242,6 @@ void sensorTask(void *) {
       xQueueSend(queue, &t, 0);
       sperreBis = millis() + SPERRE_MS;
     }
-    vTaskDelay(1);
   }
 }
 
@@ -620,7 +653,9 @@ void setup() {
   Serial.println("Start Game");
 
   queue = xQueueCreate(16, sizeof(Treffer));
-  xTaskCreatePinnedToCore(sensorTask, "sensor", 4096, NULL, 3, &sensorTaskHandle, 0);
+  // 4096 was enough while the capture was small. Room to spare is cheaper
+  // than another stack overflow found by a rollback.
+  xTaskCreatePinnedToCore(sensorTask, "sensor", 8192, NULL, 3, &sensorTaskHandle, 1);
 
   // Station on the configured network, our own access point if that does not
   // come up in time. Blocks for up to the timeout — deliberately, see net.cpp.
@@ -665,7 +700,11 @@ void setup() {
     String j = String("{\"host\":\"") + diag::sinkHost() + "\",\"port\":" +
                diag::sinkPort() + ",\"on\":" + (diag::enabled() ? "true" : "false") +
                ",\"session\":\"" + diag::sessionId() + "\",\"dropped\":" +
-               diag::droppedEvents() + "}";
+               diag::droppedEvents() +
+               ",\"a\":" + String(letzteA) + ",\"b\":" + String(letzteB) +
+               ",\"base_a\":" + String(baselineA) + ",\"base_b\":" + String(baselineB) +
+               ",\"gap_us\":" + String(abstandUs) +
+               ",\"ticks\":" + String(sensorTicks) + "}";
     server.send(200, "application/json", j);
   });
   server.begin();
