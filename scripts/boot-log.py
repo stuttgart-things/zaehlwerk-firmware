@@ -7,6 +7,10 @@ Monitor offen ist. Also: Reset auslösen und von der ersten Zeile an mitlesen.
 
     python3 scripts/boot-log.py /dev/cu.usbserial-0001 14
 
+Mit --listen wird nicht zurückgesetzt, sondern nur zugehört. Das ist der Fall
+beim Rückroll-Test: dort startet das Board von selbst neu, und ein eigener
+Reset würde die Geschichte zerschneiden, die man gerade sehen will.
+
 Die Voreinstellung von 14 Sekunden ist kein Zufall: die Bewährungsfrist für ein
 frisch eingespieltes Image liegt bei zehn, die Bestätigung kommt also erst
 danach.
@@ -24,8 +28,11 @@ except ImportError:
 
 
 def main():
-    port = sys.argv[1] if len(sys.argv) > 1 else "/dev/cu.usbserial-0001"
-    seconds = float(sys.argv[2]) if len(sys.argv) > 2 else 14.0
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    nur_lauschen = "--listen" in sys.argv[1:]
+
+    port = args[0] if args else "/dev/cu.usbserial-0001"
+    seconds = float(args[1]) if len(args) > 1 else 14.0
 
     try:
         s = serial.Serial(port, 115200, timeout=0.2)
@@ -33,14 +40,16 @@ def main():
         sys.exit("Port %s nicht zu oeffnen: %s\nLaeuft noch ein Monitor darauf?"
                  % (port, e))
 
-    # DTR niedrig heisst IO0 hoch: normal starten, nicht in den Bootloader.
-    # RTS kurz hoch zieht EN auf Masse — das ist der Reset.
-    s.dtr = False
-    s.rts = True
-    time.sleep(0.12)
-    s.rts = False
-
-    print("Reset ausgeloest, lese %g s mit ...\n" % seconds)
+    if nur_lauschen:
+        print("Hoere %g s zu, ohne zurueckzusetzen ...\n" % seconds)
+    else:
+        # DTR niedrig heisst IO0 hoch: normal starten, nicht in den Bootloader.
+        # RTS kurz hoch zieht EN auf Masse — das ist der Reset.
+        s.dtr = False
+        s.rts = True
+        time.sleep(0.12)
+        s.rts = False
+        print("Reset ausgeloest, lese %g s mit ...\n" % seconds)
     raw = b""
     ende = time.time() + seconds
     while time.time() < ende:
@@ -77,12 +86,17 @@ def main():
         print(z)
 
     if not raw:
-        print("(nichts empfangen — haengt das Board am USB?)")
+        if nur_lauschen:
+            print("(still geblieben — das Board hat in der Zeit nicht neu gestartet)")
+        else:
+            print("(nichts empfangen — haengt das Board am USB?)")
         return
 
-    # Ein Neustart je Sekunde ist eine Schleife, nicht ein Start.
+    # Beim Zuhoeren sind zwei Starts erwartet: der neue Stand und, nach dem
+    # Absturz, der alte. Erst darueber hinaus ist es eine Schleife.
+    grenze = 4 if nur_lauschen else 3
     starts = text.count("ets Jul")
-    if starts > 3:
+    if starts > grenze:
         print("\nACHTUNG: %d Neustarts in %g s — das ist eine Bootschleife."
               % (starts, seconds))
 

@@ -229,10 +229,29 @@ tasks:
 
         EOF
         gum confirm "Loslegen?" || exit 0
-        pio run -e piezo-ota-crash -t upload
-        gum log --level info "Eingespielt. Jetzt mitlesen, welcher Slot zurueckkommt."
-        sleep 2
-        task boot SEKUNDEN=20
+
+        # Mithoeren, nicht zuruecksetzen — und zwar ab jetzt, nicht erst nach
+        # dem Upload. Das Board startet nach dem Einspielen von selbst neu,
+        # stuerzt drei Sekunden spaeter ab und wird zurueckgerollt; wer erst
+        # danach einen eigenen Reset ausloest, sieht nur noch das Ergebnis.
+        log=$(mktemp)
+        if [ -n "{{.PORT}}" ] && ! lsof "{{.PORT}}" >/dev/null 2>&1; then
+          {{.PIO_PY}} scripts/boot-log.py "{{.PORT}}" 60 --listen > "$log" 2>&1 &
+          lauscher=$!
+        else
+          gum log --level warn "Kein freier serieller Port — der Hergang bleibt ungesehen."
+          lauscher=""
+        fi
+
+        pio run -e piezo-ota-crash -t upload || true
+
+        if [ -n "$lauscher" ]; then
+          gum log --level info "Eingespielt. Warte auf Absturz und Rueckrollen ..."
+          wait "$lauscher" || true
+          echo
+          cat "$log"
+        fi
+        rm -f "$log"
 
   ## ──────────────────────────────────────────────
   ## WLAN
