@@ -92,7 +92,10 @@ bool rallyOffen = false;
 // The pre-trigger ring: what the sampler managed to take before the crossing.
 // At one sample per millisecond that is not a curve yet; #10 is what makes it
 // one. The shape is right either way, so the sink does not change with it.
-diag::Sample vorlauf[diag::PRE_SAMPLES];
+// The ring keeps the full timestamp; the event stores it relative to the
+// crossing once that is known.
+struct Vorlauf { uint32_t tUs; int16_t a, b; };
+Vorlauf vorlauf[diag::PRE_SAMPLES];
 size_t vorlaufKopf = 0;
 uint32_t vorlaufFuell = 0;
 
@@ -109,7 +112,7 @@ void sensorTask(void *) {
     int a = ausMock ? mock::read(true, jetztUs)  : analogRead(PIN_A);
     int b = ausMock ? mock::read(false, jetztUs) : analogRead(PIN_B);
 
-    vorlauf[vorlaufKopf] = { (uint16_t)(jetztUs & 0xffff), (int16_t)a, (int16_t)b };
+    vorlauf[vorlaufKopf] = { jetztUs, (int16_t)a, (int16_t)b };
     vorlaufKopf = (vorlaufKopf + 1) % diag::PRE_SAMPLES;
     vorlaufFuell++;
 
@@ -165,11 +168,10 @@ void sensorTask(void *) {
       for (size_t i = 0; i < diag::PRE_SAMPLES && n < diag::CAPTURE_SAMPLES; i++) {
         size_t k = (vorlaufKopf + i) % diag::PRE_SAMPLES;
         if (vorlaufFuell < diag::PRE_SAMPLES && k >= vorlaufFuell) continue;
-        h.samples[n] = vorlauf[k];
-        h.samples[n].dtUs = 0;  // filled in below, once t0 is known
+        h.samples[n] = { (int32_t)(vorlauf[k].tUs - jetztUs),
+                         vorlauf[k].a, vorlauf[k].b };
         n++;
       }
-      const uint16_t vorlaufAnzahl = n;
 
       uint32_t start = millis();
       int spA = a, spB = b;
@@ -184,10 +186,9 @@ void sensorTask(void *) {
         if (kreuzA < 0 && va >= schwelleA) kreuzA = (int32_t)(tUs - jetztUs);
         if (kreuzB < 0 && vb >= schwelleB) kreuzB = (int32_t)(tUs - jetztUs);
         if (n < diag::CAPTURE_SAMPLES) {
-          h.samples[n++] = { (uint16_t)(tUs - jetztUs), (int16_t)va, (int16_t)vb };
+          h.samples[n++] = { (int32_t)(tUs - jetztUs), (int16_t)va, (int16_t)vb };
         }
       }
-      for (uint16_t i = 0; i < vorlaufAnzahl; i++) h.samples[i].dtUs = 0;
 
       // Compare against each channel's own threshold — the two are never
       // exactly equally sensitive.
@@ -241,6 +242,13 @@ int   punkteA = 0, punkteB = 0;
 String spieler[2];
 int seiteZuSpieler[2] = {0, 1};   // half A -> a, half B -> b
 int satzNummer = 1;
+int saetze[2] = {0, 0};   // by player, not by half
+
+// How far a simulated run goes. Endless is for watching the chain; one game and
+// one match are for producing a session that looks like an evening.
+enum class Simulation { Aus, Dauerhaft, EinSpiel, EinMatch };
+Simulation simulation = Simulation::Aus;
+uint32_t spielEndeMs = 0;
 
 int spielerAn(char seite) { return seiteZuSpieler[seite == 'A' ? 0 : 1]; }
 
@@ -539,8 +547,13 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
     </div>
     <div class="row" style="margin-top:8px">
       <button onclick="mtrig('rally','A')">Rallye abspielen</button>
-      <button id="ma" class="warn" onclick="autoplay()">Autoplay an</button>
+      <button id="ma" class="warn" onclick="sim('auto')">Autoplay an</button>
     </div>
+    <div class="row" style="margin-top:8px">
+      <button id="mg" onclick="sim('game')">Ein Spiel</button>
+      <button id="mmm" onclick="sim('match')">Ein Match (best of 5)</button>
+    </div>
+    <div class="msg" id="ms2"></div>
   </div>
 </div>
 
@@ -629,6 +642,13 @@ function tick(){
     wn.textContent=d.over?('Sieger: '+(d.winner=='A'?d.na:d.nb)):'';
     bpa.textContent='Punkt '+d.na; bpb.textContent='Punkt '+d.nb;
     if(d.mock!==mockAn || d.auto!==autoAn) mockZeigen(d);
+    simAn = d.sim;
+    const namen=['','laeuft dauerhaft','spielt ein Spiel','spielt ein Match'];
+    ms2.textContent = d.sim ? ('Simulation '+namen[d.sim]+'. Saetze '+d.sa+':'+d.sb+'.')
+                            : (d.sa||d.sb ? 'Match beendet. Saetze '+d.sa+':'+d.sb+'.' : '');
+    mg.textContent  = d.sim===2 ? 'Anhalten' : 'Ein Spiel';
+    mmm.textContent = d.sim===3 ? 'Anhalten' : 'Ein Match (best of 5)';
+    ma.textContent  = d.sim===1 ? 'Autoplay aus' : 'Autoplay an';
     sq.innerHTML=[...d.rally].map(c=>`<div class="chip${c=='B'?' b':''}">${c}</div>`).join('');
     lg.innerHTML=d.log.length?d.log.map(e=>
       `<div class="entry${e.h?' w':''}"><div class="f">${[...e.f].join(' → ')}</div>
@@ -699,7 +719,6 @@ function mockZeigen(d){
   mb.classList.toggle('on', mockAn);
   mt.style.display = mockAn ? 'block' : 'none';
   mq.textContent = mockAn ? 'Zurueck auf echtes Spiel' : 'Auf Mock umschalten';
-  ma.textContent = autoAn ? 'Autoplay aus' : 'Autoplay an';
 }
 function mtrig(t,s){halt=Date.now()+300;
   fetch('/mock?t='+t+'&s='+s).then(r=>r.json()).then(mockZeigen).catch(()=>{})}
@@ -712,9 +731,14 @@ function quelle(){
     tick();
   }).catch(()=>{});
 }
-function autoplay(){
+// 0 aus, 1 dauerhaft, 2 ein Spiel, 3 ein Match — wie in der Firmware.
+let simAn=0;
+function sim(t){
+  const aus = (simAn!==0);
   halt=Date.now()+300;
-  fetch('/mock?t=auto&on='+(autoAn?0:1)).then(r=>r.json()).then(mockZeigen).catch(()=>{});
+  fetch('/mock?t='+t+'&on='+(aus?0:1)).then(r=>r.json()).then(d=>{
+    mockZeigen(d); tick();
+  }).catch(()=>{});
 }
 function netLaden(){
   fetch('/net').then(r=>r.json()).then(n=>{
@@ -784,6 +808,9 @@ void handleState() {
   j += ",\"satz\":" + String(satzNummer);
   j += ",\"mock\":" + String(mock::on() ? "true" : "false");
   j += ",\"auto\":" + String(mock::autoplay() ? "true" : "false");
+  j += ",\"sim\":" + String((int)simulation);
+  j += ",\"sa\":" + String(saetze[spielerAn('A')]);
+  j += ",\"sb\":" + String(saetze[spielerAn('B')]);
   j += ",\"img\":\"" + String(ota::imageState()) + "\"";
   j += ",\"up\":" + String(ota::progress());
   j += ",\"log\":[";
@@ -964,8 +991,18 @@ void setup() {
       }
     } else if (t == "rally") {
       mock::playRally();
-    } else if (t == "auto") {
-      mock::setAutoplay(server.arg("on") != "0");
+    } else if (t == "auto" || t == "game" || t == "match") {
+      const bool an = server.arg("on") != "0";
+      if (!an) {
+        simulation = Simulation::Aus;
+      } else {
+        if (t == "game")  simulation = Simulation::EinSpiel;
+        if (t == "match") { simulation = Simulation::EinMatch; saetze[0] = saetze[1] = 0; }
+        if (t == "auto")  simulation = Simulation::Dauerhaft;
+        if (t != "auto") neuesSpiel();
+      }
+      mock::setAutoplay(an);
+      spielEndeMs = 0;
     } else if (t.length()) {
       const char s = server.arg("s") == "B" ? 'B' : 'A';
       mock::Kind k = mock::Kind::Bounce;
@@ -1018,9 +1055,43 @@ bool startWarSauber() {
       && sensorTicks > 1000;
 }
 
+// A simulated run decides for itself what happens when a game ends. It waits a
+// couple of seconds first, so somebody watching the page sees the final score
+// rather than a number that jumps.
+void simulationTreiben() {
+  if (simulation == Simulation::Aus || !vorbei) { spielEndeMs = 0; return; }
+  if (!spielEndeMs) { spielEndeMs = millis(); return; }
+  if (millis() - spielEndeMs < 2500) return;
+  spielEndeMs = 0;
+
+  if (simulation == Simulation::EinSpiel) {
+    simulation = Simulation::Aus;
+    mock::setAutoplay(false);
+    return;
+  }
+  if (simulation == Simulation::Dauerhaft) {
+    neuesSpiel();
+    return;
+  }
+
+  // A match. The set goes to the player, not to the half — they change ends
+  // between sets, which is the whole reason the mapping exists.
+  saetze[spielerAn(sieger)]++;
+  if (saetze[0] >= 3 || saetze[1] >= 3) {
+    simulation = Simulation::Aus;
+    mock::setAutoplay(false);
+    diag::match("end", spieler[0], spieler[1],
+                seiteZuSpieler[0], seiteZuSpieler[1], satzNummer);
+    return;
+  }
+  seitenWechseln();
+  neuesSpiel();
+}
+
 void loop() {
   server.handleClient();
   net::tick();
+  simulationTreiben();
   mock::tick();
   diag::tick();
   ota::handle();

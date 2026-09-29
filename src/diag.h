@@ -21,10 +21,12 @@ namespace diag {
 enum class Decision { Counted, BelowThreshold, Deadtime, Ambiguous };
 const char *decisionName(Decision d);
 
-// One raw sample pair. dtUs is microseconds since the start of the capture, so
-// an irregular sample rate stays readable — which it is until #10 lands.
+// One raw sample pair. dtUs is microseconds relative to the crossing, so an
+// irregular sample rate stays readable — which it is until #10 lands. It is
+// signed because the pre-trigger happened before the crossing, and stamping
+// those with zero made the first milliseconds of every curve a lie.
 struct Sample {
-  uint16_t dtUs;
+  int32_t dtUs;
   int16_t a;
   int16_t b;
 };

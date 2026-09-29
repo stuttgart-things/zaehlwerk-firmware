@@ -227,17 +227,49 @@ func TestTheChunksOfOneEventCountAsOneSequenceNumber(t *testing.T) {
 	}
 }
 
-// A crossing that was never counted has no side to be right or wrong about.
-// Counting those dragged a generated run with 15% wrong sides down to 40%.
-func TestMockScoringIgnoresCrossingsThatDecidedNoSide(t *testing.T) {
+// Getting it right is not the same question for every kind of generated event.
+// A phantom hit that scores is a failure, however confidently it names a side;
+// a net ball is two halves equally loud, and a detector naming a side there is
+// guessing. Scoring everything by the side alone reported a run as perfect
+// while a ghost had been counted as a point.
+func TestEachKindOfGeneratedEventIsScoredByItsOwnRightAnswer(t *testing.T) {
 	s, _ := newTestSink(t)
 	now := time.Now()
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"hit","side":"A","counted":true,"intended":{"side":"A"}}`), now)
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":2,"type":"hit","side":null,"decision":"deadtime","counted":false,"intended":{"side":"B"}}`), now)
+	hit := func(seq int, side, decision string, counted bool, kind, intended string) {
+		sideJSON := "null"
+		if side != "" {
+			sideJSON = `"` + side + `"`
+		}
+		s.Handle([]byte(fmt.Sprintf(
+			`{"v":1,"session_id":"aa","seq":%d,"type":"hit","side":%s,"decision":%q,`+
+				`"counted":%t,"intended":{"side":%q,"type":%q}}`,
+			seq, sideJSON, decision, counted, intended, kind)), now)
+	}
+
+	hit(1, "A", "counted", true, "bounce", "A")        // right
+	hit(2, "B", "counted", true, "bounce", "A")        // wrong side
+	hit(3, "A", "counted", true, "ghost", "A")         // a phantom that scored
+	hit(4, "", "below_threshold", false, "ghost", "A") // correctly ignored
+	hit(5, "A", "ambiguous", true, "net", "A")         // honest about not knowing
+	hit(6, "A", "counted", true, "net", "A")           // claimed a side anyway
+
+	// A crossing this generator invented, with no ground truth behind it.
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":7,"type":"hit","side":null,"decision":"deadtime","counted":false}`), now)
 
 	sum := s.Sessions()[0].Summary()
-	if sum.Intended != 1 || sum.IntendedRight != 1 || sum.MockAccuracy != 1 {
-		t.Errorf("scored %d of %d (%.2f), want 1 of 1", sum.IntendedRight, sum.Intended, sum.MockAccuracy)
+	if sum.Intended != 6 {
+		t.Errorf("scored %d events, want 6 — the one with no intended must not count", sum.Intended)
+	}
+	if sum.IntendedRight != 3 {
+		t.Errorf("right on %d, want 3", sum.IntendedRight)
+	}
+	for kind, want := range map[string][2]uint64{
+		"bounce": {1, 2}, "ghost": {1, 2}, "net": {1, 2},
+	} {
+		if sum.RightByType[kind] != want[0] || sum.ByType[kind] != want[1] {
+			t.Errorf("%s: %d of %d, want %d of %d",
+				kind, sum.RightByType[kind], sum.ByType[kind], want[0], want[1])
+		}
 	}
 }
 

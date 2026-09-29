@@ -40,6 +40,24 @@ type Hit struct {
 	} `json:"intended,omitempty"`
 }
 
+// verdict decides whether the detector got a generated event right, which is
+// not the same question for every kind of event.
+//
+//	bounce, weak  counted, on the side it was on
+//	ghost         not counted — a phantom that scores is a failure
+//	net           ambiguous, because both halves were equally loud and a
+//	              detector naming a side there is guessing
+func (h Hit) verdict() bool {
+	switch h.Intended.Type {
+	case "ghost", "crosstalk":
+		return !h.Counted
+	case "net":
+		return h.Decision == "ambiguous" || !h.Counted
+	default:
+		return h.Counted && h.Side != nil && *h.Side == h.Intended.Side
+	}
+}
+
 // Point is the part of a point event the summary counts.
 type Point struct {
 	PointID string `json:"point_id"`

@@ -63,6 +63,8 @@ type Session struct {
 	// can be scored without anybody labelling it.
 	Intended      uint64
 	IntendedRight uint64
+	ByType        map[string]uint64
+	RightByType   map[string]uint64
 }
 
 func NewSink(dir string, patience time.Duration) (*Sink, error) {
@@ -85,12 +87,14 @@ func (s *Sink) session(id string, now time.Time) (*Session, error) {
 	se := &Session{
 		ID: id, Path: path, Started: now,
 		fh: fh, file: bufio.NewWriterSize(fh, 64*1024),
-		pending:  map[uint64]*pending{},
-		Counts:   map[string]uint64{},
-		Decision: map[string]uint64{},
-		Reasons:  map[string]uint64{},
-		Tags:     map[string]uint64{},
-		Players:  map[string]uint64{},
+		pending:     map[uint64]*pending{},
+		Counts:      map[string]uint64{},
+		Decision:    map[string]uint64{},
+		Reasons:     map[string]uint64{},
+		Tags:        map[string]uint64{},
+		Players:     map[string]uint64{},
+		ByType:      map[string]uint64{},
+		RightByType: map[string]uint64{},
 	}
 	s.sessions[id] = se
 	return se, nil

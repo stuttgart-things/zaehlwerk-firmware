@@ -119,7 +119,9 @@ func (m *mockSender) hit(rally int, side string, decision string, counted bool,
 	fmt.Fprintf(&b, `,"baseline_a":12,"baseline_b":11,"cross_a_us":0,"cross_b_us":%d`,
 		m.rnd.Intn(900))
 	fmt.Fprintf(&b, `,"ratio":%.3f,"counted":%t`, ratio, counted)
-	fmt.Fprintf(&b, `,"intended":{"side":%q,"type":"bounce"}`, intendedSide)
+	if intendedSide != "" {
+		fmt.Fprintf(&b, `,"intended":{"side":%q,"type":"bounce"}`, intendedSide)
+	}
 
 	if samples > 0 {
 		ts, as, bs := mockSamples(max(peakA, peakB), min(peakA, peakB), samples)
@@ -210,11 +212,13 @@ func runMock(args []string) error {
 
 			// The crossings nobody sees: too quiet to count, or inside the
 			// dead time after the one that did.
+			// Filler crossings carry no intended: they are noise this generator
+			// invents, not events with a ground truth to be scored against.
 			if rnd.Float64() < 0.5 {
-				m.hit(r, "", "deadtime", false, 400+rnd.Intn(300), 90, 0, intended)
+				m.hit(r, "", "deadtime", false, 400+rnd.Intn(300), 90, 0, "")
 			}
 			if rnd.Float64() < 0.4 {
-				m.hit(r, "", "below_threshold", false, 130+rnd.Intn(120), 40, 0, intended)
+				m.hit(r, "", "below_threshold", false, 130+rnd.Intn(120), 40, 0, "")
 			}
 		}
 
