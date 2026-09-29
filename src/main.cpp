@@ -23,17 +23,19 @@
   a player reads it. Comments and serial output are English, like the rest of
   the repository.
 
-  How the firmware is laid out:
-    core 0  sensor task, sweeps both channels and reports events
-    core 1  web server and game logic
-  That split matters — otherwise the web server swallows bounces. Note that the
-  sides are the wrong way round and ADR-0003 reverses them: the wifi task lives
-  on core 0 too. Until #10 lands, this is the sketch's arrangement.
+  How the firmware is laid out (ADR-0003):
+    core 1  sensor task, alone, sampling continuously and never yielding
+    core 0  web server, game logic, wifi, logging, OTA
+  The split matters, and so do the sides. The wifi and lwIP tasks live on core 0,
+  so a sampler there shares a core with the radio: on the bench that cost a
+  measured 24 ms gap in the middle of a peak window. Core 1 belongs to the
+  sampler; anything else that wants it has to justify itself.
 */
 
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <driver/adc.h>
 
 #include <string>
 
@@ -45,8 +47,6 @@
 #include "version.h"
 
 /* ================= configuration ================= */
-const int  PIN_A = ZW_PIN_A;
-const int  PIN_B = ZW_PIN_B;
 const char *AP_PREFIX = ZW_AP_SSID;   // the chip id is appended, see net.cpp
 const char *AP_PASS   = ZW_AP_PASS;
 
@@ -94,17 +94,38 @@ diag::Sample vorlauf[diag::PRE_SAMPLES];
 size_t vorlaufKopf = 0;
 uint32_t vorlaufFuell = 0;
 
+// GPIO34 and GPIO35 are ADC1 channels 6 and 7. ADC1 is not a preference: ADC2
+// is unavailable while wifi is running.
+//
+// The mapping is fixed by the chip, so moving a piezo to another pin has to
+// move the channel with it. The assertion turns that into a build error rather
+// than a board that reads the wrong pin and says nothing.
+static_assert(ZW_PIN_A == 34 && ZW_PIN_B == 35,
+              "the ADC1 channels below are chosen for GPIO34 and GPIO35");
+const adc1_channel_t KANAL_A = ADC1_CHANNEL_6;
+const adc1_channel_t KANAL_B = ADC1_CHANNEL_7;
+
 void sensorTask(void *) {
-  analogReadResolution(12);
-  analogSetAttenuation(ADC_11db);
+  // The same configuration analogRead() would apply, applied once instead of on
+  // every call. That is where the time went: 84 microseconds per read, measured,
+  // against a bounce that rises in tens.
+  adc1_config_width(ADC_WIDTH_BIT_12);
+  adc1_config_channel_atten(KANAL_A, ADC_ATTEN_DB_11);
+  adc1_config_channel_atten(KANAL_B, ADC_ATTEN_DB_11);
+
+  // This core is the sampler's. Nothing else runs here, so starving the idle
+  // task is deliberate rather than an oversight — and the watchdog has to be
+  // told, or it reports the design as a fault.
+  disableCore1WDT();
+
   uint32_t sperreBis = 0;
 
   for (;;) {
     sensorTicks++;
 
     const uint32_t jetztUs = micros();
-    int a = analogRead(PIN_A);
-    int b = analogRead(PIN_B);
+    int a = adc1_get_raw(KANAL_A);
+    int b = adc1_get_raw(KANAL_B);
 
     vorlauf[vorlaufKopf] = { (uint16_t)(jetztUs & 0xffff), (int16_t)a, (int16_t)b };
     vorlaufKopf = (vorlaufKopf + 1) % diag::PRE_SAMPLES;
@@ -116,9 +137,10 @@ void sensorTask(void *) {
     if (!uebertritt) {
       // Quiet: let the baselines follow, slowly enough that a hit does not
       // drag them along.
-      baselineA += (a - baselineA) / 64;
-      baselineB += (b - baselineB) / 64;
-      vTaskDelay(1);
+      // Slow enough that a hit does not drag them along. No delay here: the
+      // loop runs flat out, which is the point of the change.
+      baselineA += (a - baselineA) / 256;
+      baselineB += (b - baselineB) / 256;
       continue;
     }
 
@@ -142,7 +164,6 @@ void sensorTask(void *) {
       h.preUs = 0;
       h.sampleCount = 0;
       diag::hit(h);
-      vTaskDelay(1);
       continue;
     }
 
@@ -166,8 +187,8 @@ void sensorTask(void *) {
       int32_t kreuzB = b >= schwelleB ? 0 : -1;
       while (millis() - start < (uint32_t)FENSTER_MS) {
         uint32_t tUs = micros();
-        int va = analogRead(PIN_A); if (va > spA) spA = va;
-        int vb = analogRead(PIN_B); if (vb > spB) spB = vb;
+        int va = adc1_get_raw(KANAL_A); if (va > spA) spA = va;
+        int vb = adc1_get_raw(KANAL_B); if (vb > spB) spB = vb;
         if (kreuzA < 0 && va >= schwelleA) kreuzA = (int32_t)(tUs - jetztUs);
         if (kreuzB < 0 && vb >= schwelleB) kreuzB = (int32_t)(tUs - jetztUs);
         if (n < diag::CAPTURE_SAMPLES) {
@@ -208,7 +229,6 @@ void sensorTask(void *) {
       xQueueSend(queue, &t, 0);
       sperreBis = millis() + SPERRE_MS;
     }
-    vTaskDelay(1);
   }
 }
 
@@ -620,7 +640,7 @@ void setup() {
   Serial.println("Start Game");
 
   queue = xQueueCreate(16, sizeof(Treffer));
-  xTaskCreatePinnedToCore(sensorTask, "sensor", 4096, NULL, 3, &sensorTaskHandle, 0);
+  xTaskCreatePinnedToCore(sensorTask, "sensor", 4096, NULL, 3, &sensorTaskHandle, 1);
 
   // Station on the configured network, our own access point if that does not
   // come up in time. Blocks for up to the timeout — deliberately, see net.cpp.
