@@ -35,7 +35,7 @@ is the laptop even on the right wifi.
 ```bash
 task            # what to type, in order
 task setup      # create secrets.ini: wifi and OTA passwords
-task doctor     # tools, board, network, passwords
+task check      # tools, board, network, passwords
 task flash      # once, over USB
 task boot       # reset and read the boot lines
 task ota        # everything after that, over wifi

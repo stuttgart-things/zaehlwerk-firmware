@@ -32,7 +32,7 @@ tasks:
         Von null auf ein laufendes Board:
 
           task setup      # secrets.ini anlegen (WLAN- und OTA-Passwort)
-          task doctor     # prueft Werkzeuge, Board, Netz und Passwoerter
+          task check      # prueft Werkzeuge, Board, Netz und Passwoerter
           task flash      # einmalig ueber USB
           task boot       # zuruecksetzen und die Startzeilen lesen
 
@@ -73,8 +73,8 @@ tasks:
           gum log --level warn "Ohne OTA-Passwort bleibt das Einspielen ueber die Luft aus."
         fi
 
-  doctor:
-    desc: Alles prüfen, was heute schon mal im Weg stand
+  check:
+    desc: Prüfen, ob etwas im Weg steht — Werkzeuge, Board, Netz, Passwörter
     silent: true
     cmds:
       - |
@@ -142,7 +142,7 @@ tasks:
     cmds:
       - pio test -e native
 
-  check:
+  verify:
     desc: Bauen und testen — was vor einem Commit grün sein muss
     cmds:
       - task: build

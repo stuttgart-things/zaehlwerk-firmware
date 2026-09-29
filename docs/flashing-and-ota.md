@@ -167,7 +167,7 @@ not reuse a password from anywhere else for it.
 | | |
 | --- | --- |
 | `task setup` | write `secrets.ini`, passwords prompted without echo |
-| `task doctor` | tools, board, serial port, passwords, wifi, git state |
+| `task check` | tools, board, serial port, passwords, wifi, git state |
 | `task flash` | the USB flash, refusing if a monitor holds the port |
 | `task boot` | reset and print the boot lines, so the slot and image state are visible |
 | `task ota` | the wifi check first, then the upload |
