@@ -125,6 +125,12 @@ void sensorTask(void *) {
       continue;
     }
 
+    // What this crossing was meant to be, read now rather than after the peak
+    // window: a generated event is over in twelve milliseconds and the window
+    // runs for thirty, so asking afterwards always found nothing.
+    const char sollSeite = mock::intendedSide();
+    const char *sollTyp = mock::intendedType();
+
     const bool zaehlt = !sperre && (a >= schwelleA || b >= schwelleB);
 
     if (!zaehlt) {
@@ -135,8 +141,8 @@ void sensorTask(void *) {
       h.rallyId = rallyId;
       h.side = ' ';
       h.decision = sperre ? diag::Decision::Deadtime : diag::Decision::BelowThreshold;
-      h.intendedSide = mock::intendedSide();
-      h.intendedType = mock::intendedType();
+      h.intendedSide = sollSeite;
+      h.intendedType = sollTyp;
       h.peakA = a; h.peakB = b;
       h.baselineA = baselineA; h.baselineB = baselineB;
       h.crossAUs = a >= logSchwelleA ? 0 : -1;
@@ -202,8 +208,8 @@ void sensorTask(void *) {
       h.rallyId = rallyId;
       h.side = t.seite;
       h.decision = eindeutig ? diag::Decision::Counted : diag::Decision::Ambiguous;
-      h.intendedSide = mock::intendedSide();
-      h.intendedType = mock::intendedType();
+      h.intendedSide = sollSeite;
+      h.intendedType = sollTyp;
       h.peakA = spA; h.peakB = spB;
       h.baselineA = baselineA; h.baselineB = baselineB;
       h.crossAUs = kreuzA; h.crossBUs = kreuzB;
