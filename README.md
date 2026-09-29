@@ -128,11 +128,17 @@ Watch the monitor. The versions are identical on both slots, so the partition
 name is what tells them apart:
 
 ```
-[ota] laeuft aus ota_1, Image auf Probe
+[ota] laeuft aus app1, Image auf Probe
 [ota] OTA_TEST_CRASH: Absturz mit Absicht, der Bootloader rollt zurueck
 ...
-[ota] laeuft aus ota_0, Image bestaetigt
+[ota] laeuft aus app0, Image bestaetigt
 ```
+
+The two app slots in `default.csv` are **labelled** `app0` and `app1`;
+`ota_0` and `ota_1` are their subtypes, which is what the partition table lists
+and what nothing ever prints. A fresh USB flash lands in `app0` and reports
+`Image ohne Kennzeichnung`, because a flash over the wire sets no OTA state —
+only an update does.
 
 The board is back on the previous firmware without anybody touching it.
 
