@@ -711,6 +711,7 @@ function diagZeigen(d){
   di.innerHTML = (d.on?'Sendet an <b>'+d.host+':'+d.port+'</b>'
                       :'<span class="warn">Aus</span> &mdash; ohne Sink-Adresse wird nichts protokolliert')
     + '<br>Sitzung <b>'+d.session+'</b>'
+    + (d.held?'<br><span class="warn">'+d.held+' Ereignisse warten auf einen Sink</span>':'')
     + (d.dropped?'<br><span class="warn">'+d.dropped+' Ereignisse verworfen</span>':'');
   if(!dh.value && d.host)dh.value=d.host;
   if(!dp.value)dp.value=d.port;
@@ -1102,7 +1103,7 @@ void setup() {
     String j = String("{\"host\":\"") + diag::sinkHost() + "\",\"port\":" +
                diag::sinkPort() + ",\"on\":" + (diag::enabled() ? "true" : "false") +
                ",\"session\":\"" + diag::sessionId() + "\",\"dropped\":" +
-               diag::droppedEvents() + "}";
+               diag::droppedEvents() + ",\"held\":" + diag::heldEvents() + "}";
     server.send(200, "application/json", j);
   });
   server.begin();
