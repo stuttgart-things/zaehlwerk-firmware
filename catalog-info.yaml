@@ -1,0 +1,27 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: zaehlwerk-firmware
+  title: Zählwerk Firmware
+  description: ESP32 firmware for the zaehlwerk table tennis scoreboard — piezo hit detection, scoring, a scoreboard over wifi, and over-the-air updates with a rollback.
+  annotations:
+    github.com/project-slug: stuttgart-things/zaehlwerk-firmware
+    backstage.io/techdocs-ref: dir:.
+  tags:
+    - esp32
+    - firmware
+    - platformio
+    - arduino
+    - iot
+  links:
+    - url: https://github.com/stuttgart-things/zaehlwerk-firmware
+      title: GitHub Repository
+      icon: github
+    - url: https://github.com/stuttgart-things/zaehlwerk
+      title: zaehlwerk-api — the scorekeeping service it reports to
+      icon: github
+spec:
+  type: service
+  lifecycle: experimental
+  owner: stuttgart-things

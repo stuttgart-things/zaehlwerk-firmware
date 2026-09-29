@@ -1,0 +1,28 @@
+---
+# TechDocs. Backstage reads this because catalog-info.yaml points at the repo
+# root with `backstage.io/techdocs-ref: dir:.`.
+#
+# Local preview, rendered the way Backstage renders it:
+#     task docs:serve
+site_name: zaehlwerk-firmware
+site_description: ESP32 firmware for the zaehlwerk table tennis scoreboard
+repo_url: https://github.com/stuttgart-things/zaehlwerk-firmware
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+nav:
+  - Overview: index.md
+  - Flashing and updates: flashing-and-ota.md
+  - Event schema: event-schema.md
+  - Bench bring-up: piezo-stufe-1-2.md
+  - Decisions:
+      - 0001 ESP-NOW to a hub: adr/0001-esp-now-to-a-hub.md
+      - 0002 Wifi station with an access point fallback: adr/0002-wifi-station-with-access-point-fallback.md
+      - 0003 Sampling on core 1: adr/0003-sampling-on-core-1.md
+      - 0004 Diagnostic log over UDP: adr/0004-diagnostic-log-over-udp-to-a-sink.md
+      - 0005 Labels are append-only records: adr/0005-labels-are-append-only-records.md
+      - 0006 The firmware owns the half to player mapping: adr/0006-the-firmware-owns-the-half-to-player-mapping.md
+
+plugins:
+  - techdocs-core
