@@ -47,6 +47,14 @@
 #define ZW_OTA_PASS ""
 #endif
 
+// The port the board listens on for the sink's answer. A sink that is simply
+// not running looks exactly like one that is listening, because UDP says
+// nothing — so the board asks, and holds what it cannot deliver until somebody
+// answers.
+#ifndef ZW_DIAG_PORT
+#define ZW_DIAG_PORT 9009
+#endif
+
 // Names this board in the log. Two tables in one sink file are otherwise only
 // distinguishable by their session id, which says nothing to a person.
 #ifndef ZW_DEVICE_ID

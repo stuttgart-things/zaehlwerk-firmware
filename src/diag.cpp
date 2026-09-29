@@ -5,6 +5,7 @@
 #include <esp_mac.h>
 #include <esp_random.h>
 
+#include "config.h"
 #include "version.h"
 
 namespace diag {
@@ -44,6 +45,15 @@ int gehalten_ = 0;
 uint32_t haltenSeitMs_ = 0;
 uint32_t verworfen_ = 0;   // too large to hold, or dropped to make room
 
+// UDP tells a sender nothing, so a sink that crashed and one that is listening
+// are indistinguishable — and a board that cannot tell fires a whole game into
+// nothing. So the board says hello and the sink answers; no answer for this long
+// and it holds instead of sending.
+const uint32_t LEBEN_MS = 6000;
+const uint32_t HALLO_MS = 2000;
+uint32_t zuletztGehoert_ = 0;
+uint32_t zuletztGefragt_ = 0;
+
 char sessionId_[9] = "00000000";
 uint32_t seq_ = 0;
 uint32_t dropped_ = 0;
@@ -66,7 +76,11 @@ String esc(const String &in) {
   return out;
 }
 
-bool sendable() { return on_ && host_.length() > 0; }
+bool lebt() {
+  return zuletztGehoert_ && (millis() - zuletztGehoert_) < LEBEN_MS;
+}
+
+bool sendable() { return on_ && host_.length() > 0 && lebt(); }
 
 void aeltestenVerwerfen() {
   if (gehalten_ == 0) return;
@@ -219,7 +233,8 @@ void begin(const Config &cfg) {
            (uint16_t)(esp_random() & 0xffff));
 
   queue_ = xQueueCreate(QUEUE_DEPTH, sizeof(Hit));
-  udp.begin(0);
+  // A fixed local port, so the sink can answer without being told one.
+  udp.begin(ZW_DIAG_PORT);
 
   Serial.printf("[diag] session %s, sink %s:%u, %s\n", sessionId_,
                 host_.length() ? host_.c_str() : "(none)", port_,
@@ -274,7 +289,31 @@ void nachschicken() {
   gehalten_ -= i;
 }
 
+// The hello goes out whatever the buffer is doing: it is how the sink learns
+// where to answer, and holding it would be a deadlock.
+void hallo() {
+  if (!on_ || host_.length() == 0) return;
+  if (zuletztGefragt_ && millis() - zuletztGefragt_ < HALLO_MS) return;
+  zuletztGefragt_ = millis();
+  transmit(String("{\"v\":1,\"type\":\"ping\",\"session_id\":\"") + sessionId_ +
+           "\",\"held\":" + gehalten_ + "}");
+}
+
+void lauschen() {
+  // Anything arriving on our port counts as an answer. There is nothing else
+  // that would send to it, and parsing it would buy nothing.
+  int n = udp.parsePacket();
+  while (n > 0) {
+    uint8_t weg[64];
+    while (udp.available() > 0) udp.read(weg, sizeof(weg));
+    zuletztGehoert_ = millis();
+    n = udp.parsePacket();
+  }
+}
+
 void tick() {
+  lauschen();
+  hallo();
   nachschicken();
   if (!queue_) return;
   static Hit h;
@@ -366,7 +405,8 @@ void setEnabled(bool on) {
   prefs.end();
 }
 
-bool enabled() { return sendable(); }
+bool enabled() { return on_ && host_.length() > 0; }
+bool sinkAlive() { return sendable(); }
 const String &sinkHost() { return host_; }
 uint16_t sinkPort() { return port_; }
 const char *sessionId() { return sessionId_; }

@@ -681,7 +681,7 @@ function tick(){
     // listening is gone the moment it is over, and nothing used to say so.
     rc.className = 'rec ' + (d.rec ? 'on' : 'off');
     rc.innerHTML = d.rec ? '\u25CF  wird aufgezeichnet'
-                         : '\u25CB  wird nicht aufgezeichnet';
+                         : '\u25CB  kein Sink erreichbar';
     if(d.mock!==mockAn || d.auto!==autoAn) mockZeigen(d);
     simAn = d.sim; simPause = d.pause; transportZeigen();
     const namen=['','laeuft dauerhaft','spielt ein Spiel','spielt ein Match'];
@@ -708,8 +708,12 @@ function tick(){
 }
 setInterval(tick,400);tick();
 function diagZeigen(d){
-  di.innerHTML = (d.on?'Sendet an <b>'+d.host+':'+d.port+'</b>'
-                      :'<span class="warn">Aus</span> &mdash; ohne Sink-Adresse wird nichts protokolliert')
+  di.innerHTML = (!d.on
+      ? '<span class="warn">Aus</span> &mdash; ohne Sink-Adresse wird nichts protokolliert'
+      : d.alive
+        ? 'Sendet an <b>'+d.host+':'+d.port+'</b>, der Sink antwortet'
+        : '<span class="warn">'+d.host+':'+d.port+' antwortet nicht</span>'
+          + ' &mdash; es wird gehalten, nicht gesendet')
     + '<br>Sitzung <b>'+d.session+'</b>'
     + (d.held?'<br><span class="warn">'+d.held+' Ereignisse warten auf einen Sink</span>':'')
     + (d.dropped?'<br><span class="warn">'+d.dropped+' Ereignisse verworfen</span>':'');
@@ -875,7 +879,7 @@ void handleState() {
   j += ",\"pause\":" + String(mock::paused() ? "true" : "false");
   j += ",\"sa\":" + String(saetze[spielerAn('A')]);
   j += ",\"sb\":" + String(saetze[spielerAn('B')]);
-  j += ",\"rec\":" + String(diag::enabled() ? "true" : "false");
+  j += ",\"rec\":" + String(diag::sinkAlive() ? "true" : "false");
   j += ",\"img\":\"" + String(ota::imageState()) + "\"";
   j += ",\"up\":" + String(ota::progress());
   j += ",\"log\":[";
@@ -1104,6 +1108,7 @@ void setup() {
     if (server.hasArg("on")) diag::setEnabled(server.arg("on") == "1");
     String j = String("{\"host\":\"") + diag::sinkHost() + "\",\"port\":" +
                diag::sinkPort() + ",\"on\":" + (diag::enabled() ? "true" : "false") +
+               ",\"alive\":" + (diag::sinkAlive() ? "true" : "false") +
                ",\"session\":\"" + diag::sessionId() + "\",\"dropped\":" +
                diag::droppedEvents() + ",\"held\":" + diag::heldEvents() + "}";
     server.send(200, "application/json", j);

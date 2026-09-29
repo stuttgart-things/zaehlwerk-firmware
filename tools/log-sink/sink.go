@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +21,9 @@ import (
 // loss that reads as a quiet session.
 type Sink struct {
 	dir string
+	// Where an answer goes. Set by whatever owns the socket, because the sink
+	// itself has no business knowing how the packets arrive.
+	Answer func(net.Addr)
 	// How long an event may wait for its missing chunks before it is written
 	// off. Long enough that a slow reassembly is not mistaken for loss.
 	patience time.Duration
@@ -114,11 +118,20 @@ func (s *Sink) session(id string, now time.Time) (*Session, error) {
 // Handle takes one datagram. It never returns an error for bad input: a
 // malformed datagram is recorded and the session carries on, because stopping
 // on one would lose the rest of a match.
-func (s *Sink) Handle(raw []byte, now time.Time) {
+// Handle takes one datagram and, when it is the board asking whether anybody is
+// there, answers it. The answer is the whole point: UDP tells a sender nothing,
+// so without one a board cannot distinguish a listening sink from a dead one and
+// fires a whole game into nothing.
+func (s *Sink) Handle(raw []byte, from net.Addr, now time.Time) {
+	env, err := parseEnvelope(raw)
+	if err == nil && env.Type == "ping" {
+		s.answer(from)
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	env, err := parseEnvelope(raw)
 	if err != nil || env.SessionID == "" {
 		if se := s.any(); se != nil {
 			se.writeSink(now, fmt.Sprintf(`"kind":"unparsable","bytes":%d`, len(raw)))
@@ -196,6 +209,12 @@ func (s *Sink) maybeExport(se *Session, raw []byte, typ string) {
 	}
 	if n := len(written); n > 0 {
 		fmt.Printf("game finished: %s\n", written[n-1])
+	}
+}
+
+func (s *Sink) answer(from net.Addr) {
+	if s.Answer != nil && from != nil {
+		s.Answer(from)
 	}
 }
 

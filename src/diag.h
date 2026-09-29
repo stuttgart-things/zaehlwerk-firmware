@@ -113,7 +113,12 @@ void note(const char *level, const String &text);
 // Settings, stored in NVS.
 void setSink(const String &host, uint16_t port);
 void setEnabled(bool on);
+// Switched on and pointed somewhere. Not the same as reaching anybody.
 bool enabled();
+
+// Somebody answered recently. This is what the scoreboard shows, because
+// "logging is on" and "the game is being kept" are different claims.
+bool sinkAlive();
 const String &sinkHost();
 uint16_t sinkPort();
 

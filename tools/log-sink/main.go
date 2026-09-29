@@ -78,6 +78,12 @@ func main() {
 
 	// Named as they actually are: everything a day produced under that day, with
 	// the finished games beside the raw sessions.
+	// The board asks every couple of seconds whether anybody is there; this is
+	// the yes. Without it the board holds everything it produces.
+	sink.Answer = func(to net.Addr) {
+		pc.WriteTo([]byte(`{"v":1,"type":"pong"}`), to)
+	}
+
 	log.Printf("listening on %s", *addr)
 	log.Printf("writing to %s/<day>/sessions and %s/<day>/games", *dir, *dir)
 	if *web != "" {
@@ -99,13 +105,13 @@ func main() {
 	go func() {
 		buf := make([]byte, 65535)
 		for {
-			n, _, err := pc.ReadFrom(buf)
+			n, from, err := pc.ReadFrom(buf)
 			if err != nil {
 				return
 			}
 			raw := make([]byte, n)
 			copy(raw, buf[:n])
-			sink.Handle(raw, time.Now())
+			sink.Handle(raw, from, time.Now())
 		}
 	}()
 

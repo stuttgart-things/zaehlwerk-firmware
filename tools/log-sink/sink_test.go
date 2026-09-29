@@ -37,7 +37,7 @@ func lines(t *testing.T, dir string) []string {
 
 func TestAWholeEventIsStoredAsItArrived(t *testing.T) {
 	s, dir := newTestSink(t)
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":7,"type":"note","text":"hi"}`), time.Now())
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":7,"type":"note","text":"hi"}`), nil, time.Now())
 	s.Close()
 
 	got := lines(t, dir)
@@ -65,7 +65,7 @@ func TestChunksAreJoinedIntoOneRecord(t *testing.T) {
 			"v": 1, "session_id": "aa", "seq": 9,
 			"chunk": map[string]int{"i": i, "n": 3}, "part": part,
 		})
-		s.Handle(env, time.Now())
+		s.Handle(env, nil, time.Now())
 	}
 	s.Close()
 
@@ -83,8 +83,8 @@ func TestChunksAreJoinedIntoOneRecord(t *testing.T) {
 // thousands of events as lost on the very first datagram.
 func TestTheFirstSequenceNumberIsTheBaselineNotZero(t *testing.T) {
 	s, dir := newTestSink(t)
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":4140,"type":"note"}`), time.Now())
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":4141,"type":"note"}`), time.Now())
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":4140,"type":"note"}`), nil, time.Now())
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":4141,"type":"note"}`), nil, time.Now())
 	s.Close()
 
 	for _, l := range lines(t, dir) {
@@ -99,8 +99,8 @@ func TestTheFirstSequenceNumberIsTheBaselineNotZero(t *testing.T) {
 
 func TestAJumpInSequenceNumbersIsReportedAsLoss(t *testing.T) {
 	s, dir := newTestSink(t)
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":10,"type":"note"}`), time.Now())
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":14,"type":"note"}`), time.Now())
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":10,"type":"note"}`), nil, time.Now())
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":14,"type":"note"}`), nil, time.Now())
 	s.Close()
 
 	if got := s.Sessions()[0].Lost; got != 3 {
@@ -125,7 +125,7 @@ func TestAnEventWhoseChunksNeverArriveIsWrittenOff(t *testing.T) {
 		"v": 1, "session_id": "aa", "seq": 3,
 		"chunk": map[string]int{"i": 0, "n": 4}, "part": `{"type":"hit"`,
 	})
-	s.Handle(env, time.Now())
+	s.Handle(env, nil, time.Now())
 	s.Sweep(time.Now().Add(time.Second))
 	s.Close()
 
@@ -146,9 +146,9 @@ func TestAnEventWhoseChunksNeverArriveIsWrittenOff(t *testing.T) {
 func TestTheSummaryCountsDecisionsAndCountedSeparately(t *testing.T) {
 	s, _ := newTestSink(t)
 	now := time.Now()
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"hit","decision":"counted","counted":true}`), now)
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":2,"type":"hit","decision":"ambiguous","counted":true}`), now)
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":3,"type":"hit","decision":"below_threshold","counted":false}`), now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"hit","decision":"counted","counted":true}`), nil, now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":2,"type":"hit","decision":"ambiguous","counted":true}`), nil, now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":3,"type":"hit","decision":"below_threshold","counted":false}`), nil, now)
 
 	sum := s.Sessions()[0].Summary()
 	if sum.Decisions["ambiguous"] != 1 || sum.Decisions["below_threshold"] != 1 {
@@ -165,8 +165,8 @@ func TestTheSummaryCountsDecisionsAndCountedSeparately(t *testing.T) {
 func TestMockSessionsScoreTheSideWithoutAnybodyLabelling(t *testing.T) {
 	s, _ := newTestSink(t)
 	now := time.Now()
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"hit","side":"A","counted":true,"intended":{"side":"A","type":"bounce"}}`), now)
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":2,"type":"hit","side":"A","counted":true,"intended":{"side":"B","type":"bounce"}}`), now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"hit","side":"A","counted":true,"intended":{"side":"A","type":"bounce"}}`), nil, now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":2,"type":"hit","side":"A","counted":true,"intended":{"side":"B","type":"bounce"}}`), nil, now)
 
 	sum := s.Sessions()[0].Summary()
 	if sum.Intended != 2 || sum.IntendedRight != 1 || sum.MockAccuracy != 0.5 {
@@ -210,14 +210,14 @@ func TestReplayResolvesSupersededLabelsAndKeepsTheLoss(t *testing.T) {
 func TestTheChunksOfOneEventCountAsOneSequenceNumber(t *testing.T) {
 	s, _ := newTestSink(t)
 	now := time.Now()
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"note"}`), now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"note"}`), nil, now)
 	whole := `{"v":1,"session_id":"aa","seq":2,"type":"hit","decision":"counted","counted":true}`
 	for i, part := range []string{whole[:30], whole[30:60], whole[60:]} {
 		env, _ := json.Marshal(map[string]any{
 			"v": 1, "session_id": "aa", "seq": 2,
 			"chunk": map[string]int{"i": i, "n": 3}, "part": part,
 		})
-		s.Handle(env, now)
+		s.Handle(env, nil, now)
 	}
 	se := s.Sessions()[0]
 	if se.Late != 0 {
@@ -244,7 +244,7 @@ func TestEachKindOfGeneratedEventIsScoredByItsOwnRightAnswer(t *testing.T) {
 		s.Handle([]byte(fmt.Sprintf(
 			`{"v":1,"session_id":"aa","seq":%d,"type":"hit","side":%s,"decision":%q,`+
 				`"counted":%t,"intended":{"side":%q,"type":%q}}`,
-			seq, sideJSON, decision, counted, intended, kind)), now)
+			seq, sideJSON, decision, counted, intended, kind)), nil, now)
 	}
 
 	hit(1, "A", "counted", true, "bounce", "A")        // right
@@ -255,7 +255,7 @@ func TestEachKindOfGeneratedEventIsScoredByItsOwnRightAnswer(t *testing.T) {
 	hit(6, "A", "counted", true, "net", "A")           // claimed a side anyway
 
 	// A crossing this generator invented, with no ground truth behind it.
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":7,"type":"hit","side":null,"decision":"deadtime","counted":false}`), now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":7,"type":"hit","side":null,"decision":"deadtime","counted":false}`), nil, now)
 
 	sum := s.Sessions()[0].Summary()
 	if sum.Intended != 6 {
@@ -283,9 +283,9 @@ func TestCorrectionsAreCountedByTag(t *testing.T) {
 	for _, tag := range []string{"net", "net", "wrong_side"} {
 		s.Handle([]byte(`{"v":1,"session_id":"aa","seq":`+fmt.Sprint(len(tag))+
 			`,"type":"point","reason":"manual","side":"A","tag":"`+tag+
-			`","note":"Ball kam von der Kante"}`), now)
+			`","note":"Ball kam von der Kante"}`), nil, now)
 	}
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":90,"type":"point","reason":"last_bounce","side":"B"}`), now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":90,"type":"point","reason":"last_bounce","side":"B"}`), nil, now)
 	s.Close()
 
 	sum := s.Sessions()[0].Summary()
@@ -313,11 +313,11 @@ func TestCorrectionsAreCountedByTag(t *testing.T) {
 func TestPointsAreCountedByThePlayerTheyResolvedTo(t *testing.T) {
 	s, _ := newTestSink(t)
 	now := time.Now()
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"point","reason":"last_bounce","side":"A","player":"a","player_name":"Pat"}`), now)
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":2,"type":"point","reason":"last_bounce","side":"B","player":"b","player_name":"Ana"}`), now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"point","reason":"last_bounce","side":"A","player":"a","player_name":"Pat"}`), nil, now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":2,"type":"point","reason":"last_bounce","side":"B","player":"b","player_name":"Ana"}`), nil, now)
 	// After a change of ends the same half resolves to the other player.
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":3,"type":"point","reason":"last_bounce","side":"A","player":"b","player_name":"Ana"}`), now)
-	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":4,"type":"point","reason":"undo","side":" ","player":"","player_name":""}`), now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":3,"type":"point","reason":"last_bounce","side":"A","player":"b","player_name":"Ana"}`), nil, now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":4,"type":"point","reason":"undo","side":" ","player":"","player_name":""}`), nil, now)
 
 	sum := s.Sessions()[0].Summary()
 	if sum.Players["Ana"] != 2 || sum.Players["Pat"] != 1 {

@@ -68,6 +68,19 @@ core; the sampler still never blocks, and a full buffer drops the oldest rather
 than waiting. What arrives late is marked as such — a `note` says how many
 events were held and for how long, so nobody reads a flush as a burst of play.
 
+**Holding needs knowing, and UDP does not tell.** The first version of this held
+only when the board knew there was no sink: logging off, or no address set. A
+sink that had crashed looks exactly like one that is listening, so the board
+went on firing into it — and half a game was lost that way while this was being
+tested. So the board asks. It sends a `ping` to the sink every two seconds, the
+sink answers whoever asked, and six seconds without an answer means hold rather
+than send. The ping goes out whatever the buffer is doing, because it is how the
+sink learns where to answer and holding it would deadlock.
+
+That is also what the scoreboard shows. "Logging is switched on" and "this game
+is being kept" are different claims, and only the second one is worth a line
+under the score.
+
 ## Consequences
 
 - UDP loses packets and this one has no retry, so loss has to be visible rather
