@@ -40,6 +40,7 @@ task flash      # once, over USB
 task boot       # reset and read the boot lines
 task ota        # everything after that, over wifi
 task board      # which network, address and channel it is on
+task sink       # receive the diagnostic log, viewer on :9001
 task rollback   # prove a bad build gets put back
 ```
 
