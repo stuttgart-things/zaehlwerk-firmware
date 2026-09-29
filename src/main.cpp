@@ -891,7 +891,8 @@ void handleState() {
 void handleVersion() {
   String j = String("{\"fw\":\"") + ZW_FW_VERSION
            + "\",\"git\":\"" + ZW_GIT_HASH
-           + "\",\"dirty\":" + (ZW_GIT_DIRTY ? "true" : "false") + "}";
+           + "\",\"built\":\"" + ZW_BUILD_DATE + "\""
+           + ",\"dirty\":" + (ZW_GIT_DIRTY ? "true" : "false") + "}";
   server.send(200, "application/json", j);
 }
 
@@ -964,7 +965,8 @@ void handleWifi() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nZaehlwerk %s  git %s\n", ZW_FW_VERSION, ZW_GIT_HASH);
+  Serial.printf("\nZaehlwerk %s  git %s  built %s\n",
+                ZW_FW_VERSION, ZW_GIT_HASH, ZW_BUILD_DATE);
   Serial.println("Start Game");
 
 #ifdef DEFAULT_MOCK
