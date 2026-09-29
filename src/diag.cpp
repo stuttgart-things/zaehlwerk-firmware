@@ -191,6 +191,7 @@ void sayHello() {
   String f = String(",\"device_id\":\"") + esc(deviceId_) + "\"";
   f += String(",\"fw_version\":\"") + ZW_FW_VERSION + "\"";
   f += String(",\"git_hash\":\"") + ZW_GIT_HASH + "\"";
+  f += String(",\"build_date\":\"") + ZW_BUILD_DATE + "\"";
   f += String(",\"sensor\":\"") + cfg_.sensor + "\"";
   f += String(",\"reason\":\"") + cfg_.reason + "\"";
   f += ",\"params\":" + (parameters_ ? parameters_() : cfg_.paramsJson);

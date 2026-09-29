@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // A session file is what arrived; a game file is what happened. They are not the
@@ -54,16 +55,35 @@ type GameRally struct {
 	Point    *GamePoint `json:"point,omitempty"`
 }
 
+// ParamChange is a knob turned while the game was being played. Without these
+// the file would state the settings as they were at boot and describe a game
+// that was played under different ones.
+type ParamChange struct {
+	At   string `json:"at"`
+	Name string `json:"name"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	By   string `json:"by"`
+}
+
 type Game struct {
-	Number   int            `json:"game"`
-	Session  string         `json:"session_id"`
-	Firmware map[string]any `json:"firmware"`
-	Params   map[string]any `json:"params"`
-	Players  map[string]any `json:"players,omitempty"`
-	Sides    map[string]any `json:"sides,omitempty"`
-	Started  string         `json:"started"`
-	Ended    string         `json:"ended"`
-	Final    map[string]any `json:"final,omitempty"`
+	Number    int            `json:"game"`
+	SetNumber int            `json:"set_number"`
+	Session   string         `json:"session_id"`
+	Firmware  map[string]any `json:"firmware"`
+
+	// The settings in force when the game started, and anything turned during
+	// it. A file that cannot say which thresholds produced its numbers is a
+	// file nobody can compare with another one.
+	Params        map[string]any `json:"params"`
+	ParamsChanged []ParamChange  `json:"params_changed"`
+
+	Players   map[string]any `json:"players"`
+	Sides     map[string]any `json:"sides"`
+	Started   string         `json:"started"`
+	Ended     string         `json:"ended"`
+	DurationS int            `json:"duration_s"`
+	Final     map[string]any `json:"final,omitempty"`
 
 	// What the recording itself did, because a game with holes in it must not
 	// read like a complete one.
@@ -108,13 +128,27 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 		incomplete       uint64
 		records          uint64
 		nummer           int
+		satz             int
+		letzteZeit       string
 	)
+	satz = 1
+
+	// A copy per game, because a knob turned in one must not silently rewrite
+	// the record of the games before it.
+	kopie := func(m map[string]any) map[string]any {
+		out := map[string]any{}
+		for k, v := range m {
+			out[k] = v
+		}
+		return out
+	}
 
 	start := func(at string) {
 		nummer++
 		cur = &Game{
-			Number: nummer, Session: session, Firmware: firmware, Params: params,
-			Players: players, Sides: sides, Started: at,
+			Number: nummer, SetNumber: satz, Session: session, Firmware: firmware,
+			Params: kopie(params), ParamsChanged: []ParamChange{},
+			Players: kopie(players), Sides: kopie(sides), Started: at,
 			Transport: map[string]uint64{},
 		}
 		curRally = nil
@@ -123,7 +157,12 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 		if cur == nil {
 			return
 		}
+		// An unfinished game still ended, at whatever arrived last.
+		if at == "" {
+			at = letzteZeit
+		}
 		cur.Ended = at
+		cur.DurationS = sekunden(cur.Started, at)
 		cur.Transport["records"] = records
 		cur.Transport["lost"] = lost
 		cur.Transport["incomplete"] = incomplete
@@ -143,13 +182,19 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 			continue
 		}
 		at := str(m, "recv_at")
+		if at != "" {
+			letzteZeit = at
+		}
 
 		switch str(m, "type") {
 		case "session":
 			session = str(m, "session_id")
+			// Carried into every game file, because a measurement that cannot
+			// say which binary produced it is one nobody can repeat.
 			firmware = map[string]any{
 				"version": m["fw_version"], "git": m["git_hash"],
-				"sensor": m["sensor"], "device": m["device_id"],
+				"built": m["build_date"], "sensor": m["sensor"],
+				"device": m["device_id"],
 			}
 			if p, ok := m["params"].(map[string]any); ok {
 				params = p
@@ -164,6 +209,23 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 				}
 			case "incomplete", "unjoinable":
 				incomplete++
+			}
+
+		case "param":
+			records++
+			// Applied to the running set, so the next game starts from what is
+			// actually in force rather than from what booted.
+			name, to := str(m, "name"), str(m, "to")
+			if params == nil {
+				params = map[string]any{}
+			}
+			if name != "" {
+				params[name] = to
+			}
+			if cur != nil {
+				cur.ParamsChanged = append(cur.ParamsChanged, ParamChange{
+					At: at, Name: name, From: str(m, "from"), To: to, By: str(m, "by"),
+				})
 			}
 
 		case "note":
@@ -182,6 +244,9 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 				sides = s
 			}
 			if str(m, "phase") == "start" {
+				if n := num(m, "set_number"); n > 0 {
+					satz = n
+				}
 				finish(at)
 				start(at)
 			} else if cur != nil {
@@ -276,6 +341,17 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 		finish("")
 	}
 	return games, nil
+}
+
+// sekunden is deliberately forgiving: a missing or odd timestamp costs the
+// duration, not the file.
+func sekunden(von, bis string) int {
+	a, err1 := time.Parse(time.RFC3339Nano, von)
+	b, err2 := time.Parse(time.RFC3339Nano, bis)
+	if err1 != nil || err2 != nil || b.Before(a) {
+		return 0
+	}
+	return int(b.Sub(a).Seconds())
 }
 
 func summarise(g Game) map[string]any {

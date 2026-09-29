@@ -16,3 +16,7 @@
 #ifndef ZW_GIT_DIRTY
 #define ZW_GIT_DIRTY 0
 #endif
+
+#ifndef ZW_BUILD_DATE
+#define ZW_BUILD_DATE "unknown"
+#endif

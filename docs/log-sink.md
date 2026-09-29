@@ -44,8 +44,15 @@ kilobytes for a full game, which is small enough to read in one go or hand to
 somebody.
 
 ```json
-{ "game": 2, "final": {"a": 8, "b": 11, "winner": "B", "winner_name": "Ana"},
-  "firmware": {"git": "4526ff9", "sensor": "mock"},
+{ "game": 2, "set_number": 4, "duration_s": 72,
+  "final": {"a": 8, "b": 11, "winner": "B", "winner_name": "Ana"},
+  "firmware": {"version": "0.0.0-dev", "git": "4526ff9",
+               "built": "2026-09-29T16:41Z", "sensor": "mock", "device": "piezo-1"},
+  "params": {"threshold_a": 300, "log_threshold_a": 120, "clear_ratio": 1.8,
+             "deadtime_us": 60000, "rally_timeout_ms": 1500},
+  "params_changed": [{"at": "…", "name": "threshold_a",
+                      "from": "300", "to": "280", "by": "web"}],
+  "players": {"a": "Pat", "b": "Ana"}, "sides": {"A": "a", "B": "b"},
   "transport": {"records": 148, "lost": 0, "incomplete": 0},
   "rallies": [ { "rally_id": "…-r2", "sequence": "ABABABA",
                  "hits": [ {"side":"B","decision":"counted","peak_a":264,
@@ -54,6 +61,16 @@ somebody.
   "summary": { "rallies": 19, "crossings": 72,
                "crossings_by_decision": {"counted": 72} } }
 ```
+
+Every game file states the settings that produced its numbers: `params` as they
+stood when the game started, and `params_changed` for every knob turned during
+it, with the time and who turned it. Without both, a file could describe a game
+played under thresholds it never had.
+
+`firmware` carries the version, the git hash **and the build date**, because two
+builds from the same uncommitted tree are otherwise indistinguishable and a
+measurement that cannot name the binary that produced it is one nobody can
+repeat.
 
 The raw curves are left out by default — they are what makes a session file
 large and they only matter while somebody is working on detection. `-samples`
