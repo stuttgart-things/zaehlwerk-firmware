@@ -88,7 +88,14 @@ void rallyEnd(uint32_t rallyId, const String &sequence, const char *closedBy);
 void point(uint32_t pointId, uint32_t rallyId, const String &reason,
            const String &hint, char side, int fromA, int fromB, char fromServe,
            int toA, int toB, char toServe, bool over,
-           const String &tag, const String &note);
+           const String &tag, const String &note,
+           const String &player, const String &playerName);
+
+// Players, ends and sets. phase is "start", "players", "ends_swapped" or "end".
+// `sides` is the mapping in force from this event onwards, which is what makes
+// every later point resolvable.
+void match(const char *phase, const String &nameA, const String &nameB,
+           int sideAPlayer, int sideBPlayer, int setNumber);
 void param(const char *name, const String &from, const String &to, const char *by);
 void note(const char *level, const String &text);
 

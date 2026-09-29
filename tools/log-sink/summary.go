@@ -39,6 +39,9 @@ func (se *Session) count(raw []byte, typ string) {
 			if p.Tag != "" {
 				se.Tags[p.Tag]++
 			}
+			if p.PlayerName != "" && p.Reason != "undo" {
+				se.Players[p.PlayerName]++
+			}
 		}
 	case "rally":
 		se.Rallies++
@@ -64,6 +67,7 @@ type Summary struct {
 	Rallies   uint64            `json:"rallies"`
 	Reasons   map[string]uint64 `json:"points_per_reason"`
 	Tags      map[string]uint64 `json:"corrections_per_tag"`
+	Players   map[string]uint64 `json:"points_per_player"`
 
 	// Only meaningful for a mock session, where every generated hit says which
 	// side it was meant to be. Nothing has to be labelled by hand for this one.
@@ -90,6 +94,7 @@ func (se *Session) Summary() Summary {
 		Rallies:   se.Rallies,
 		Reasons:   se.Reasons,
 		Tags:      se.Tags,
+		Players:   se.Players,
 		Intended:  se.Intended,
 	}
 	s.IntendedRight = se.IntendedRight
@@ -147,6 +152,12 @@ func (s Summary) Text() string {
 		b.WriteString("  points by reason\n")
 		for _, k := range sortedKeys(s.Reasons) {
 			fmt.Fprintf(&b, "    %-16s %d\n", k, s.Reasons[k])
+		}
+	}
+	if len(s.Players) > 0 {
+		b.WriteString("  points by player\n")
+		for _, k := range sortedKeys(s.Players) {
+			fmt.Fprintf(&b, "    %-16s %d\n", k, s.Players[k])
 		}
 	}
 	if len(s.Tags) > 0 {

@@ -42,6 +42,7 @@ func replay(path string) (Summary, []Label, error) {
 	se := &Session{
 		Counts: map[string]uint64{}, Decision: map[string]uint64{},
 		Reasons: map[string]uint64{}, Tags: map[string]uint64{},
+		Players: map[string]uint64{},
 	}
 	var labels []Label
 	superseded := map[string]bool{}

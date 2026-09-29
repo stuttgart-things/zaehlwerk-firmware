@@ -34,6 +34,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Preferences.h>
 
 #include <string>
 
@@ -216,6 +217,28 @@ void sensorTask(void *) {
 struct Eintrag { String folge; String urteil; String hinweis; };
 
 int   punkteA = 0, punkteB = 0;
+// Names belong to players, not to halves. A piezo knows which half it is under
+// and can never know who is standing there — and between sets the players
+// change ends while the sensor does not. So the mapping lives here and inverts
+// on a change of ends (ADR-0006).
+//
+// Index 0 is player a, index 1 is player b. For doubles both names go in one
+// field: "Pat & Chris". That is a display question, not a data model one.
+String spieler[2];
+int seiteZuSpieler[2] = {0, 1};   // half A -> a, half B -> b
+int satzNummer = 1;
+
+int spielerAn(char seite) { return seiteZuSpieler[seite == 'A' ? 0 : 1]; }
+
+// The name to show for a half, or the half's own letter when nobody was named.
+// Without names everything keeps saying A and B, which is the point of optional.
+String nameFuer(char seite) {
+  const String &n = spieler[spielerAn(seite)];
+  return n.length() ? n : String(seite);
+}
+
+bool habenNamen() { return spieler[0].length() || spieler[1].length(); }
+
 char  ersterAufschlag = 'A';
 char  aufschlag = 'A';
 bool  vorbei = false;
@@ -255,11 +278,15 @@ void punktGeben(char gewinner, String folge, String hinweis, const char *grund,
   if (gewinner == 'A') punkteA++; else punkteB++;
   if (game::beendet(punkteA, punkteB)) { vorbei = true; sieger = gewinner; }
   else aufschlag = game::aufschlagFuer(punkteA, punkteB, ersterAufschlag);
-  logEintragen(folge, String("Punkt fuer ") + gewinner, hinweis);
+  logEintragen(folge, String("Punkt fuer ") + nameFuer(gewinner), hinweis);
 
+  // side, player and the name it resolved to at that moment, all three. A
+  // mapping that turns out wrong is then correctable in the export instead of
+  // invalidating the session.
   diag::point(++pointId, rallyId, grund, hinweis, gewinner,
               vorA, vorB, vorAufschlag, punkteA, punkteB, aufschlag, vorbei,
-              marke, kommentar);
+              marke, kommentar,
+              spielerAn(gewinner) == 0 ? "a" : "b", nameFuer(gewinner));
 }
 
 void rallyBeenden() {
@@ -285,12 +312,69 @@ void zurueck(const String &marke = "", const String &kommentar = "") {
   rally = "";
   diag::point(++pointId, rallyId, "undo", "", ' ',
               vorA, vorB, vorAufschlag, punkteA, punkteB, aufschlag, vorbei,
-              marke, kommentar);
+              marke, kommentar, "", "");
 }
 
 void neuesSpiel() {
   punkteA = punkteB = 0; vorbei = false; sieger = ' ';
   aufschlag = ersterAufschlag; rally = ""; logAnzahl = 0; verlaufN = 0;
+  satzNummer++;
+  diag::match("start", spieler[0], spieler[1],
+              seiteZuSpieler[0], seiteZuSpieler[1], satzNummer);
+}
+
+// The one manual step this design cannot remove: a change of ends nobody
+// presses silently swaps every point after it. So it is a control on the main
+// screen rather than a setting, and it is logged.
+void seitenWechseln() {
+  const int h = seiteZuSpieler[0];
+  seiteZuSpieler[0] = seiteZuSpieler[1];
+  seiteZuSpieler[1] = h;
+  diag::match("ends_swapped", spieler[0], spieler[1],
+              seiteZuSpieler[0], seiteZuSpieler[1], satzNummer);
+}
+
+// A short list of who has played here lately, so a name is usually one tap
+// rather than typed on a phone at a table.
+const char *NVS_ZW = "zaehlwerk";
+const char *KEY_NAMEN = "namen";
+
+String letzteNamen() {
+  Preferences p;
+  p.begin(NVS_ZW, true);
+  String n = p.isKey(KEY_NAMEN) ? p.getString(KEY_NAMEN, "") : String();
+  p.end();
+  return n;
+}
+
+void namenMerken(const String &name) {
+  if (!name.length()) return;
+  String liste = letzteNamen();
+  String neu = name;
+  // Most recent first, no repeats, and a cap: a list nobody can scan is a list
+  // nobody uses.
+  int von = 0;
+  int wie_viele = 1;
+  while (von < (int)liste.length() && wie_viele < 8) {
+    int bis = liste.indexOf('\n', von);
+    if (bis < 0) bis = liste.length();
+    String teil = liste.substring(von, bis);
+    if (teil.length() && teil != name) { neu += "\n" + teil; wie_viele++; }
+    von = bis + 1;
+  }
+  Preferences p;
+  p.begin(NVS_ZW, false);
+  p.putString(KEY_NAMEN, neu);
+  p.end();
+}
+
+void namenSetzen(const String &a, const String &b) {
+  spieler[spielerAn('A')] = a;
+  spieler[spielerAn('B')] = b;
+  namenMerken(a);
+  namenMerken(b);
+  diag::match("players", spieler[0], spieler[1],
+              seiteZuSpieler[0], seiteZuSpieler[1], satzNummer);
 }
 
 /* ================= web server ================= */
@@ -307,6 +391,10 @@ body{background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system
 .wrap{max-width:520px;margin:0 auto}
 .board{background:#12171D;border-radius:10px;padding:22px 18px;text-align:center}
 .score{font:700 74px/1 ui-monospace,Menlo,monospace;color:#F5F7F9;letter-spacing:2px}
+.who{display:flex;justify-content:space-between;font:600 13px inherit;
+color:#9AA7B4;margin-bottom:4px;gap:12px}
+.who span{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ends{margin-top:12px}
 .serve{margin-top:10px;font-size:11px;letter-spacing:.16em;color:var(--orange);text-transform:uppercase}
 .won{margin-top:8px;color:var(--teal);font-size:13px}
 .seq{display:flex;gap:5px;justify-content:center;margin-top:14px;min-height:26px;flex-wrap:wrap}
@@ -351,10 +439,28 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 </style></head><body><div class="wrap">
 
 <div class="board">
+  <div class="who"><span id="wa">A</span><span id="wb">B</span></div>
   <div class="score" id="sc">0:0</div>
   <div class="serve" id="sv">Aufschlag A</div>
   <div class="won" id="wn"></div>
   <div class="seq" id="sq"></div>
+</div>
+
+<div class="card"><h2>Spieler</h2>
+  <div class="net">
+    <label style="margin:0">Haelfte A <span class="val" id="hl">(links am Board)</span></label>
+    <input type="text" id="pa" autocomplete="off" placeholder="Name, im Doppel beide">
+    <label style="margin:0">Haelfte B</label>
+    <input type="text" id="pb" autocomplete="off" placeholder="Name, im Doppel beide">
+    <div class="tags" id="zuletzt"></div>
+    <button onclick="spielerSpeichern()">Namen uebernehmen</button>
+    <div class="msg" id="pm">Ohne Namen bleibt alles bei A und B.</div>
+  </div>
+  <div class="row ends">
+    <button class="warn" onclick="seiten()">Seiten wechseln</button>
+  </div>
+  <div class="msg" id="sm">Nach jedem Satz. Wird das vergessen, wandern alle
+    weiteren Punkte auf die falsche Person.</div>
 </div>
 
 <div class="card"><h2>Korrektur</h2>
@@ -370,8 +476,8 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   </div>
   <input class="kom" id="kom" placeholder="Was ist passiert? (optional)" autocomplete="off">
   <div class="row">
-    <button onclick="go('/punkt?s=A')">Punkt A</button>
-    <button onclick="go('/punkt?s=B')">Punkt B</button>
+    <button id="bpa" onclick="go('/punkt?s=A')">Punkt A</button>
+    <button id="bpb" onclick="go('/punkt?s=B')">Punkt B</button>
   </div>
   <div class="row" style="margin-top:8px">
     <button class="warn" onclick="go('/zurueck')">Letzten zurück</button>
@@ -470,8 +576,10 @@ function tick(){
   if(Date.now()<halt)return;
   fetch('/state').then(r=>r.json()).then(d=>{
     sc.textContent=d.a+':'+d.b;
-    sv.textContent=d.over?'Spiel beendet':'Aufschlag '+d.serve;
-    wn.textContent=d.over?('Sieger: '+d.winner):'';
+    wa.textContent=d.na; wb.textContent=d.nb;
+    sv.textContent=d.over?'Spiel beendet':'Aufschlag '+(d.serve=='A'?d.na:d.nb);
+    wn.textContent=d.over?('Sieger: '+(d.winner=='A'?d.na:d.nb)):'';
+    bpa.textContent='Punkt '+d.na; bpb.textContent='Punkt '+d.nb;
     sq.innerHTML=[...d.rally].map(c=>`<div class="chip${c=='B'?' b':''}">${c}</div>`).join('');
     lg.innerHTML=d.log.length?d.log.map(e=>
       `<div class="entry${e.h?' w':''}"><div class="f">${[...e.f].join(' → ')}</div>
@@ -506,6 +614,35 @@ function diagSpeichern(on){
     diagZeigen(d);
     dm.textContent = d.on?'Laeuft. Auf dem Laptop muss der Sink lauschen.':'Aus.';
   }).catch(()=>{dm.textContent='Ging nicht.'});
+}
+function spielerLaden(){
+  fetch('/spieler').then(r=>r.json()).then(d=>{
+    if(document.activeElement!==pa && !pa.value && d.named)pa.value=d.a;
+    if(document.activeElement!==pb && !pb.value && d.named)pb.value=d.b;
+    // One tap beats typing on a phone at a table.
+    zuletzt.innerHTML = d.letzte.map(n=>
+      `<div class="tag" onclick="einsetzen('${n.replace(/'/g,"\\'")}')">${n}</div>`).join('');
+  }).catch(()=>{});
+}
+function einsetzen(n){
+  const ziel = (document.activeElement===pb) ? pb : (pa.value ? pb : pa);
+  ziel.value = n;
+}
+function spielerSpeichern(){
+  halt=Date.now()+600;
+  fetch('/spieler?a='+encodeURIComponent(pa.value)+'&b='+encodeURIComponent(pb.value))
+    .then(r=>r.json()).then(d=>{
+      pm.textContent = d.named ? 'Uebernommen.' : 'Ohne Namen bleibt alles bei A und B.';
+      spielerLaden(); tick();
+    }).catch(()=>{pm.textContent='Ging nicht.'});
+}
+function seiten(){
+  halt=Date.now()+600;
+  fetch('/seiten').then(()=>{
+    sm.textContent='Gewechselt. Die Namen sind mitgewandert, die Piezos nicht.';
+    pa.value=''; pb.value='';
+    spielerLaden(); tick();
+  }).catch(()=>{});
 }
 function netLaden(){
   fetch('/net').then(r=>r.json()).then(n=>{
@@ -549,6 +686,7 @@ function senden(){
   x.send(fd);
 }
 netLaden();
+spielerLaden();
 diagLaden();
 setInterval(diagLaden,5000);
 fetch('/version').then(r=>r.json()).then(v=>{
@@ -568,6 +706,10 @@ void handleState() {
   j += ",\"rally\":\"" + rally + "\"";
   j += ",\"ta\":" + String(schwelleA) + ",\"tb\":" + String(schwelleB);
   j += ",\"to\":" + String(rallyTimeout);
+  j += ",\"na\":\"" + jsonEscape(nameFuer('A')) + "\"";
+  j += ",\"nb\":\"" + jsonEscape(nameFuer('B')) + "\"";
+  j += ",\"named\":" + String(habenNamen() ? "true" : "false");
+  j += ",\"satz\":" + String(satzNummer);
   j += ",\"img\":\"" + String(ota::imageState()) + "\"";
   j += ",\"up\":" + String(ota::progress());
   j += ",\"log\":[";
@@ -701,6 +843,35 @@ void setup() {
     server.send(200, "text/plain", "ok");
   });
 
+  server.on("/spieler", []{
+    if (server.hasArg("a") || server.hasArg("b"))
+      namenSetzen(server.arg("a"), server.arg("b"));
+    String j = String("{\"a\":\"") + jsonEscape(nameFuer('A')) +
+               "\",\"b\":\"" + jsonEscape(nameFuer('B')) +
+               "\",\"named\":" + (habenNamen() ? "true" : "false") +
+               ",\"letzte\":[";
+    String l = letzteNamen();
+    int von = 0; bool erst = true;
+    while (von < (int)l.length()) {
+      int bis = l.indexOf('\n', von);
+      if (bis < 0) bis = l.length();
+      String teil = l.substring(von, bis);
+      if (teil.length()) {
+        if (!erst) j += ",";
+        j += "\"" + jsonEscape(teil) + "\"";
+        erst = false;
+      }
+      von = bis + 1;
+    }
+    j += "]}";
+    server.send(200, "application/json", j);
+  });
+
+  server.on("/seiten", []{
+    seitenWechseln();
+    server.send(200, "text/plain", "ok");
+  });
+
   server.on("/diag", []{
     if (server.hasArg("host"))
       diag::setSink(server.arg("host"),
@@ -720,6 +891,8 @@ void setup() {
   // Last, so the session event carries a network that is already up and the
   // parameters as they actually stand.
   diag::begin({ ZW_DEVICE_ID, "adc", parameterJson(), "boot", parameterJson });
+  diag::match("start", spieler[0], spieler[1],
+              seiteZuSpieler[0], seiteZuSpieler[1], satzNummer);
 }
 
 // The verdict on our own start that the rollback listens to. Deliberately more

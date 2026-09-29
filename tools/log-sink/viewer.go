@@ -53,6 +53,7 @@ type viewEvent struct {
 	RecvAt   string
 	Tag      string
 	Note     string
+	Player   string
 	Raw      []byte
 }
 
@@ -91,16 +92,17 @@ func readSession(path string) ([]viewEvent, sessionParams, error) {
 		}
 		ev := viewEvent{Seq: env.Seq, Type: env.Type, Raw: line}
 		var extra struct {
-			Decision string  `json:"decision"`
-			Side     *string `json:"side"`
-			Ratio    float64 `json:"ratio"`
-			PeakA    int     `json:"peak_a"`
-			PeakB    int     `json:"peak_b"`
-			Counted  bool    `json:"counted"`
-			RecvAt   string  `json:"recv_at"`
-			Tag      string  `json:"tag"`
-			Note     string  `json:"note"`
-			Samples  struct {
+			Decision   string  `json:"decision"`
+			Side       *string `json:"side"`
+			Ratio      float64 `json:"ratio"`
+			PeakA      int     `json:"peak_a"`
+			PeakB      int     `json:"peak_b"`
+			Counted    bool    `json:"counted"`
+			RecvAt     string  `json:"recv_at"`
+			Tag        string  `json:"tag"`
+			Note       string  `json:"note"`
+			PlayerName string  `json:"player_name"`
+			Samples    struct {
 				N int `json:"n"`
 			} `json:"samples"`
 		}
@@ -108,7 +110,7 @@ func readSession(path string) ([]viewEvent, sessionParams, error) {
 			ev.Decision, ev.Ratio = extra.Decision, extra.Ratio
 			ev.PeakA, ev.PeakB, ev.Counted = extra.PeakA, extra.PeakB, extra.Counted
 			ev.RecvAt, ev.Samples = extra.RecvAt, extra.Samples.N
-			ev.Tag, ev.Note = extra.Tag, extra.Note
+			ev.Tag, ev.Note, ev.Player = extra.Tag, extra.Note, extra.PlayerName
 			if extra.Side != nil {
 				ev.Side = *extra.Side
 			}
@@ -181,7 +183,7 @@ func serveViewer(addr, dir string, sink *Sink) {
 				html.EscapeString(name), f, label)
 		}
 		b.WriteString(`</div><div class=card><table>
-<tr><th>seq</th><th>type</th><th>decision</th><th>side</th><th>peak A</th><th>peak B</th><th>ratio</th><th>samples</th><th>tag</th><th>note</th><th></th></tr>`)
+<tr><th>seq</th><th>type</th><th>decision</th><th>side</th><th>player</th><th>peak A</th><th>peak B</th><th>ratio</th><th>samples</th><th>tag</th><th>note</th><th></th></tr>`)
 
 		shown := 0
 		for _, e := range evs {
@@ -208,10 +210,11 @@ func serveViewer(addr, dir string, sink *Sink) {
 			}
 			fmt.Fprintf(&b,
 				`<tr><td>%d</td><td>%s</td><td><span class="pill %s">%s</span></td>
-<td>%s</td><td>%d</td><td>%d</td><td>%.2f</td><td>%d</td><td>%s</td>
+<td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%.2f</td><td>%d</td><td>%s</td>
 <td style="white-space:normal;max-width:260px">%s</td><td>%s</td></tr>`,
 				e.Seq, html.EscapeString(e.Type), html.EscapeString(cls),
 				html.EscapeString(e.Decision), html.EscapeString(e.Side),
+				html.EscapeString(e.Player),
 				e.PeakA, e.PeakB, e.Ratio, e.Samples, tag,
 				html.EscapeString(e.Note), link)
 		}

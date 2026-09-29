@@ -54,6 +54,7 @@ type Session struct {
 	Decision map[string]uint64 // hits per decision
 	Reasons  map[string]uint64 // points per deciding rule
 	Tags     map[string]uint64 // corrections per tag a person chose
+	Players  map[string]uint64 // points per player, by the name in force then
 	Counted  uint64
 	Points   uint64
 	Rallies  uint64
@@ -89,6 +90,7 @@ func (s *Sink) session(id string, now time.Time) (*Session, error) {
 		Decision: map[string]uint64{},
 		Reasons:  map[string]uint64{},
 		Tags:     map[string]uint64{},
+		Players:  map[string]uint64{},
 	}
 	s.sessions[id] = se
 	return se, nil

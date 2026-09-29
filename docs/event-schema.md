@@ -239,6 +239,15 @@ the export instead of invalidating the session.
 `end`. `sides` is the mapping in force from this event onwards; it is what
 makes every later `point` resolvable.
 
+`match_id` appears once the firmware creates the match at the API
+([#17](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/17)).
+Until then the field is absent and the session stands on its own.
+
+**Names are optional.** Without them everything keeps saying `A` and `B`, and
+`players` carries empty strings. For doubles both names go in one field —
+`"Pat & Chris"` — because a side is what gets a point, and splitting it would
+be a data model for something only the display cares about.
+
 ## `ingest` — what was sent to the API, and what came back
 
 Not a duplicate of `point`: this is the delivery record, and the place an
