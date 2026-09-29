@@ -34,7 +34,7 @@ const int SPERRE_MS  = 60;          // Nachklingen
 const int FENSTER_MS = 30;          // Vergleichsfenster zwischen den Kanälen
 
 /* ================= Sensortask ================= */
-struct Treffer { char seite; int spitze; uint32_t t; };
+struct Treffer { char seite; int spitzeA; int spitzeB; uint32_t t; };
 QueueHandle_t queue;
 
 void sensorTask(void *) {
@@ -64,8 +64,10 @@ void sensorTask(void *) {
 
       Treffer t;
       t.t = millis();
-      if (relA >= relB) { t.seite = 'A'; t.spitze = spA; }
-      else              { t.seite = 'B'; t.spitze = spB; }
+      t.spitzeA = spA;
+      t.spitzeB = spB;
+      if (relA >= relB) { t.seite = 'A'; }
+      else              { t.seite = 'B'; }
 
       xQueueSend(queue, &t, 0);
       sperreBis = millis() + SPERRE_MS;
@@ -140,6 +142,7 @@ void rallyBeenden() {
   for (unsigned i = 1; i < folge.length(); i++)
     if (folge[i] == folge[i-1]) {
       hinweis = String("Doppelaufsetzer auf ") + folge[i] + " — Ball nicht zurueckgespielt.";
+      gewinner = andere(i);          // Verhindert einen falschen Gewinner, wenn der Ball nach zweimaligem Aufprallen noch zurückgespielt wird.
       break;
     }
   if (folge.length() == 1)
@@ -280,6 +283,7 @@ void handleState() {
 
 void setup() {
   Serial.begin(115200);
+  Serial.println("Start Game");
 
   queue = xQueueCreate(16, sizeof(Treffer));
   xTaskCreatePinnedToCore(sensorTask, "sensor", 4096, NULL, 3, NULL, 0);
@@ -317,7 +321,8 @@ void loop() {
     if (rally.length() == 0) sichern();
     rally += t.seite;
     letzterTreffer = t.t;
-    Serial.printf("Treffer %c  Spitze %d\n", t.seite, t.spitze);
+    Serial.printf("Treffer %c!    A:%d B:%d\n", t.seite, t.spitzeA, t.spitzeB);
+
   }
 
   if (rally.length() > 0 && millis() - letzterTreffer > (uint32_t)rallyTimeout)
