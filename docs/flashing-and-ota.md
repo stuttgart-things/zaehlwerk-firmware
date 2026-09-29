@@ -171,7 +171,7 @@ not reuse a password from anywhere else for it.
 | `task flash` | the USB flash, refusing if a monitor holds the port |
 | `task boot` | reset and print the boot lines, so the slot and image state are visible |
 | `task ota` | the wifi check first, then the upload |
-| `task rollback` | the crash build, with the boot log straight afterwards |
+| `task rollback` | the crash build, listening on the serial line from before the upload so the crash and the rollback are visible as they happen |
 | `task board` | ask a running board over HTTP what it is |
 | `task wifi:esp` / `task wifi:back` | switch to the board's access point and back |
 
