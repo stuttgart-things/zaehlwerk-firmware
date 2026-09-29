@@ -86,6 +86,10 @@ it works on a session copied off a laptop weeks later.
   pre-trigger is a handful of points rather than a shape.
 - **Out-of-order datagrams are counted, not repaired.** One sender on a local
   network makes reordering rare, and a reordered datagram is not loss.
-- **`log_threshold` has to sit above each channel's noise floor.** On the bench
-  channel A rested at about 146 counts and B near zero; with both thresholds at
-  120 the board emitted around forty events a second with nothing happening.
+- **`log_threshold` has to sit above each channel's noise floor**, and that
+  floor has to be measured on the assembled circuit. An early bench run recorded
+  channel A resting around 146 counts and B near zero and read it as an
+  asymmetry in the hardware. It was not: **nothing was connected to the board**,
+  so those were two floating pins. Floating inputs say nothing about a piezo, a
+  1 MΩ resistor or a lead. Measure the floor with the circuit attached, on the
+  table it will stand on.
