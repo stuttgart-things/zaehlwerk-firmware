@@ -63,6 +63,38 @@ today exactly as it always has, so `of those counted` is the two added together.
 When `clear_ratio` starts deciding, the difference between the two lines is what
 shows the change.
 
+## Testing it without a board
+
+```bash
+task sink                       # one terminal
+task sink:mock                  # another
+```
+
+The generator sends the same wire format the firmware does — chunked events,
+rallies, points, crossings that were counted and crossings that were not. Every
+generated hit carries `intended`, which is what lets the summary score the side
+with nothing labelled by hand:
+
+```
+mock: side right on 46 of 51 (90.2%)
+```
+
+Knobs, so a run can be repeated and a failure reproduced:
+
+```bash
+task sink:mock LOSS=0.05        # drop a twentieth of the datagrams
+task sink:mock WRONG=0.3        # decide three in ten on the wrong side
+task sink:mock RALLIES=40
+```
+
+`LOSS` is how the gap detection and the incomplete-event path get exercised: a
+dropped chunk leaves an event that never completes, which has to be written off
+rather than waited for.
+
+Only crossings that decided a side are scored. One that was never counted has no
+side to be right or wrong about — counting those dragged a run with 15% wrong
+sides down to 40% before it was fixed.
+
 ## Export
 
 ```bash

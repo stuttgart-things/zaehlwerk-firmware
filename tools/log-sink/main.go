@@ -8,6 +8,7 @@
 //	log-sink                       listen on :9000, viewer on :9001
 //	log-sink -dir ./data           somewhere else to write
 //	log-sink export <file.jsonl>   a zip with the file and a summary
+//	log-sink mock                  send a made-up session at it, no board needed
 package main
 
 import (
@@ -24,11 +25,19 @@ import (
 func main() {
 	log.SetFlags(log.Ltime)
 
-	if len(os.Args) > 1 && os.Args[1] == "export" {
-		if err := runExport(os.Args[2:]); err != nil {
-			log.Fatal(err)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "export":
+			if err := runExport(os.Args[2:]); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "mock":
+			if err := runMock(os.Args[2:]); err != nil {
+				log.Fatal(err)
+			}
+			return
 		}
-		return
 	}
 
 	var (
@@ -93,7 +102,10 @@ func main() {
 
 	<-stop
 	fmt.Println()
-	sink.Sweep(time.Now())
+	// On the way out nothing is going to arrive any more, so patience is over:
+	// an event still waiting for chunks has to be written off now or it
+	// disappears without a word, which is the silent loss this is against.
+	sink.Sweep(time.Now().Add(time.Hour))
 	for _, se := range sink.Sessions() {
 		fmt.Print(se.Summary().Text())
 	}

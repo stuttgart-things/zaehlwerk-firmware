@@ -22,9 +22,12 @@ func (se *Session) count(raw []byte, typ string) {
 		if h.Counted {
 			se.Counted++
 		}
-		if h.Intended != nil {
+		// Only a crossing that decided a side can be right or wrong about it.
+		// Counting the ones that were never counted dragged a generated run
+		// with 15% wrong sides down to 40% correct.
+		if h.Intended != nil && h.Side != nil && *h.Side != "" {
 			se.Intended++
-			if h.Side != nil && *h.Side == h.Intended.Side {
+			if *h.Side == h.Intended.Side {
 				se.IntendedRight++
 			}
 		}
