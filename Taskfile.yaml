@@ -1,0 +1,294 @@
+---
+# Task ist die Bedienoberfläche für Menschen: was jemand tippt, ist ein Task.
+# Gebaut wird trotzdem von PlatformIO — die Tasks rufen `pio` auf und legen
+# das drumherum, was man sonst jedes Mal von Hand prüft: hängt ein Board dran,
+# ist ein Monitor im Weg, ist der Laptop überhaupt im richtigen WLAN.
+#
+# gum macht die Rückfragen. Wo ein Passwort im Spiel ist, steht `silent: true`,
+# damit Task den Befehl nicht mit ausgibt.
+version: 3
+
+vars:
+  # Der serielle Port wird gesucht, nicht geraten. Überschreibbar:
+  #   PORT=/dev/cu.SLAB_USBtoUART task flash
+  PORT:
+    sh: ls /dev/cu.usbserial-* 2>/dev/null | head -1
+  # Adresse des Boards. Solange es seinen eigenen Accesspoint aufspannt, ist
+  # sie fest; im STA-Modus (#14) wird daraus zaehlwerk.local.
+  ESP_IP: '{{.ESP_IP | default "192.168.4.1"}}'
+  AP_SSID: '{{.AP_SSID | default "Zaehlwerk"}}'
+  WIFI_DEV: '{{.WIFI_DEV | default "en0"}}'
+  # Das Python, in dem pyserial steckt — das von PlatformIO.
+  PIO_PY: '{{.PIO_PY | default "$HOME/.platformio/penv/bin/python3"}}'
+
+tasks:
+
+  default:
+    desc: Was zu tippen ist, um von null auf ein laufendes Board zu kommen
+    silent: true
+    cmds:
+      - |
+        cat <<'EOF'
+        Von null auf ein laufendes Board:
+
+          task setup      # secrets.ini anlegen (WLAN- und OTA-Passwort)
+          task doctor     # prueft Werkzeuge, Board, Netz und Passwoerter
+          task flash      # einmalig ueber USB
+          task boot       # zuruecksetzen und die Startzeilen lesen
+
+        Danach geht alles ueber die Luft:
+
+          task ota        # neue Firmware ueber WLAN einspielen
+          task rollback   # absichtlich kaputte Firmware, Rueckrollen pruefen
+
+        Alles andere:
+
+          task --list
+        EOF
+
+  ## ──────────────────────────────────────────────
+  ## EINRICHTEN UND PRÜFEN
+  ## ──────────────────────────────────────────────
+
+  setup:
+    desc: secrets.ini anlegen — WLAN- und OTA-Passwort, nicht im Repo
+    silent: true
+    cmds:
+      - |
+        set -e
+        if [ -f secrets.ini ]; then
+          gum confirm "secrets.ini gibt es schon. Ueberschreiben?" || exit 0
+        fi
+        ap=$(gum input --password --header "Passwort des Accesspoints, den der ESP aufspannt" --value "pingpong")
+        ota=$(gum input --password --header "OTA-Passwort (leer = OTA bleibt aus)")
+        {
+          printf '%s\n' '; Angelegt von `task setup`. Nicht eingecheckt, siehe .gitignore.'
+          printf '\n[secrets]\n'
+          printf 'ota_pass = %s\n' "$ota"
+          printf '\nbuild_flags =\n'
+          printf "    -DZW_AP_PASS='\"%s\"'\n" "$ap"
+        } > secrets.ini
+        gum log --level info "secrets.ini geschrieben"
+        if [ -z "$ota" ]; then
+          gum log --level warn "Ohne OTA-Passwort bleibt das Einspielen ueber die Luft aus."
+        fi
+
+  doctor:
+    desc: Alles prüfen, was heute schon mal im Weg stand
+    silent: true
+    cmds:
+      - |
+        fehler=0
+        pruefe() {  # name, befehl
+          if eval "$2" >/dev/null 2>&1; then gum log --level info "$1"
+          else gum log --level error "$1"; fehler=$((fehler+1)); fi
+        }
+
+        gum style --border rounded --padding "0 1" --border-foreground 212 "zaehlwerk-firmware"
+
+        pruefe "pio ist im PATH"  "command -v pio"
+        pruefe "gum ist im PATH"  "command -v gum"
+
+        if [ -n "{{.PORT}}" ]; then
+          gum log --level info "Board am Port {{.PORT}}"
+          if lsof "{{.PORT}}" >/dev/null 2>&1; then
+            gum log --level warn "Etwas haelt den Port — ein offener Monitor blockiert den USB-Upload."
+          fi
+        else
+          gum log --level warn "Kein Board am USB (nur fuer flash/boot noetig)"
+        fi
+
+        if [ -f secrets.ini ]; then
+          ota=$(sed -nE 's/^[[:space:]]*ota_pass[[:space:]]*=[[:space:]]*(.*)$/\1/p' secrets.ini | tr -d ' ')
+          if [ -z "$ota" ]; then
+            gum log --level warn "secrets.ini da, aber ota_pass ist leer — OTA ist aus"
+          elif [ "$ota" = "bitte-aendern" ]; then
+            gum log --level warn "ota_pass steht noch auf dem Platzhalter"
+          else
+            gum log --level info "ota_pass ist gesetzt"
+          fi
+        else
+          gum log --level error "secrets.ini fehlt — 'task setup'"
+          fehler=$((fehler+1))
+        fi
+
+        if ifconfig {{.WIFI_DEV}} 2>/dev/null | grep -q 'inet 192\.168\.4\.'; then
+          gum log --level info "Im WLAN des ESP — OTA kann losgehen"
+        else
+          netz=$(ifconfig {{.WIFI_DEV}} 2>/dev/null | awk '/inet /{print $2}' | head -1)
+          gum log --level warn "Nicht im WLAN des ESP (aktuell ${netz:-ohne Adresse}) — 'task wifi:esp'"
+        fi
+
+        zweig=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+        if git diff --quiet 2>/dev/null; then
+          gum log --level info "git: $zweig, sauber"
+        else
+          gum log --level warn "git: $zweig, geaendert — Builds tragen -dirty im Versionsstring"
+        fi
+
+        [ "$fehler" -eq 0 ] && gum log --level info "Nichts steht im Weg." || exit 1
+
+  ## ──────────────────────────────────────────────
+  ## BAUEN UND TESTEN
+  ## ──────────────────────────────────────────────
+
+  build:
+    desc: piezo und piezo-test bauen
+    cmds:
+      - pio run
+
+  test:
+    desc: Die Regeltests auf dem Laptop laufen lassen
+    cmds:
+      - pio test -e native
+
+  check:
+    desc: Bauen und testen — was vor einem Commit grün sein muss
+    cmds:
+      - task: build
+      - task: test
+
+  ## ──────────────────────────────────────────────
+  ## AUF DAS BOARD
+  ## ──────────────────────────────────────────────
+
+  flash:
+    desc: Erst-Flash über USB — einmalig, danach geht alles über die Luft
+    silent: true
+    cmds:
+      - |
+        set -e
+        [ -n "{{.PORT}}" ] || { gum log --level error "Kein Board am USB."; exit 1; }
+        if lsof "{{.PORT}}" >/dev/null 2>&1; then
+          gum log --level error "Der Port ist belegt. Ein offener Monitor blockiert den Upload — erst schliessen."
+          exit 1
+        fi
+        gum confirm "Firmware ueber USB auf {{.PORT}} schreiben? Ueberschreibt, was drauf ist." || exit 0
+        pio run -e piezo -t upload
+
+  monitor:
+    desc: Serieller Monitor, 115200
+    cmds:
+      - pio device monitor
+
+  boot:
+    desc: Board zurücksetzen und die Startzeilen lesen — Slot und Image-Zustand
+    silent: true
+    cmds:
+      - |
+        [ -n "{{.PORT}}" ] || { gum log --level error "Kein Board am USB."; exit 1; }
+        if lsof "{{.PORT}}" >/dev/null 2>&1; then
+          gum log --level error "Der Port ist belegt — erst den Monitor schliessen."
+          exit 1
+        fi
+        {{.PIO_PY}} scripts/boot-log.py "{{.PORT}}" "{{.SEKUNDEN | default 14}}"
+
+  board:
+    desc: Was gerade auf dem Board läuft, über HTTP gefragt
+    silent: true
+    cmds:
+      - |
+        if ! curl -sf -m 4 "http://{{.ESP_IP}}/version" >/dev/null 2>&1; then
+          gum log --level warn "{{.ESP_IP}} antwortet nicht — im richtigen WLAN? 'task wifi:esp'"
+          gum log --level info "Ueber die serielle Leitung geht es auch: 'task boot'"
+          exit 1
+        fi
+        echo "Version: $(curl -s -m 4 http://{{.ESP_IP}}/version)"
+        echo "Zustand: $(curl -s -m 4 http://{{.ESP_IP}}/state)"
+
+  ## ──────────────────────────────────────────────
+  ## ÜBER DIE LUFT
+  ## ──────────────────────────────────────────────
+
+  ota:
+    desc: Neue Firmware über WLAN einspielen
+    silent: true
+    cmds:
+      - task: wifi:ensure
+      - |
+        gum log --level info "Beim ersten Mal fragt macOS, ob Python Verbindungen annehmen darf — ja sagen."
+        pio run -e piezo-ota -t upload
+
+  rollback:
+    desc: Absichtlich kaputte Firmware einspielen und zusehen, wie sie zurückgerollt wird
+    silent: true
+    cmds:
+      - task: wifi:ensure
+      - |
+        set -e
+        cat <<'EOF'
+
+        Was gleich passiert:
+
+          1. Ein Build mit -DOTA_TEST_CRASH geht ueber die Luft in den freien Slot.
+          2. Er startet, laeuft drei Sekunden und stuerzt mit Absicht ab.
+          3. Der Bootloader holt den vorigen Stand zurueck, ohne Zutun.
+
+        Der Absturz greift nur auf einem Image, das auf Probe laeuft. Das Board
+        kann dabei nicht in einer Startschleife haengen bleiben.
+
+        EOF
+        gum confirm "Loslegen?" || exit 0
+        pio run -e piezo-ota-crash -t upload
+        gum log --level info "Eingespielt. Jetzt mitlesen, welcher Slot zurueckkommt."
+        sleep 2
+        task boot SEKUNDEN=20
+
+  ## ──────────────────────────────────────────────
+  ## WLAN
+  ## ──────────────────────────────────────────────
+
+  wifi:ensure:
+    desc: Sicherstellen, dass der Laptop im WLAN des Boards ist
+    internal: true
+    silent: true
+    cmds:
+      - |
+        ifconfig {{.WIFI_DEV}} 2>/dev/null | grep -q 'inet 192\.168\.4\.' && exit 0
+        gum log --level warn "Der Laptop ist nicht im WLAN des ESP — der Upload liefe ins Leere."
+        gum confirm "Nach {{.AP_SSID}} wechseln?" || exit 1
+        task wifi:esp
+
+  wifi:esp:
+    desc: Ins WLAN wechseln, das das Board aufspannt
+    silent: true
+    cmds:
+      - |
+        set -e
+        pass=$(sed -nE "s/.*-DZW_AP_PASS='\"(.*)\"'.*/\1/p" secrets.ini 2>/dev/null | head -1)
+        [ -n "$pass" ] || pass=$(gum input --password --header "Passwort fuer {{.AP_SSID}}")
+        networksetup -setairportnetwork {{.WIFI_DEV}} "{{.AP_SSID}}" "$pass" >/dev/null 2>&1 || true
+        for i in $(seq 1 20); do
+          if ifconfig {{.WIFI_DEV}} 2>/dev/null | grep -q 'inet 192\.168\.4\.'; then
+            gum log --level info "Verbunden: $(ifconfig {{.WIFI_DEV}} | awk '/inet /{print $2}' | head -1)"
+            exit 0
+          fi
+          sleep 1
+        done
+        gum log --level error "Keine Adresse aus 192.168.4.x bekommen. Laeuft das Board? 'task boot'"
+        exit 1
+
+  wifi:back:
+    desc: Zurück ins gewohnte WLAN
+    silent: true
+    cmds:
+      - |
+        networksetup -setairportpower {{.WIFI_DEV}} off
+        sleep 2
+        networksetup -setairportpower {{.WIFI_DEV}} on
+        gum log --level info "WLAN neu gestartet — macOS nimmt das bevorzugte Netz."
+
+  ## ──────────────────────────────────────────────
+  ## DOKUMENTATION
+  ## ──────────────────────────────────────────────
+
+  docs:serve:
+    desc: Die TechDocs lokal ansehen, so wie Backstage sie rendert
+    silent: true
+    cmds:
+      - |
+        command -v mkdocs >/dev/null 2>&1 || {
+          gum log --level error "mkdocs fehlt: pipx install mkdocs-techdocs-core"
+          exit 1
+        }
+        mkdocs serve
