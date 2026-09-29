@@ -70,20 +70,38 @@ def main():
                 and not re.fullmatch(r"[x ]+", clean):
             lines.append(clean)
 
-    # The same line many times over: show it once, with a count.
+    # We triggered the reset, so everything before the last ROM banner is the
+    # driver flushing what it still held from the previous run. Drop it. While
+    # listening we keep all of it: there the restarts are the story.
+    if not listen_only:
+        starts = [i for i, l in enumerate(lines) if "ets Jul" in l]
+        if starts:
+            lines = lines[starts[-1]:]
+
+    # The same line many times over: show it once, with a count. Only from three
+    # repeats — for one or two the note is longer than the lines it replaces,
+    # and four identical hits in a row are four events worth seeing.
+    FOLD_FROM = 3
+
+    def flush(out, line, repeats):
+        if repeats >= FOLD_FROM:
+            out.append("  ... repeated %dx" % repeats)
+        else:
+            out.extend([line] * repeats)
+
     previous, repeats = None, 0
     folded = []
     for line in lines:
         if line == previous:
             repeats += 1
             continue
-        if repeats:
-            folded.append("  ... repeated %dx" % repeats)
-            repeats = 0
+        if previous is not None:
+            flush(folded, previous, repeats)
+        repeats = 0
         folded.append(line)
         previous = line
-    if repeats:
-        folded.append("  ... repeated %dx" % repeats)
+    if previous is not None:
+        flush(folded, previous, repeats)
 
     for line in folded:
         print(line)
