@@ -113,10 +113,11 @@ def main():
             print("(nothing received — is the board plugged in?)")
         return
 
-    # While listening, two starts are expected: the new image, and the one that
-    # replaces it. Only beyond that is it a loop.
+    # Count only what we are showing. Counting the whole buffer reported
+    # thirty-one restarts for a board that had booted once, because the driver
+    # still held the banners from before the reset.
     limit = 4 if listen_only else 3
-    starts = text.count("ets Jul")
+    starts = sum(1 for l in lines if "ets Jul" in l)
     if starts > limit:
         print("\nWARNING: %d restarts in %gs — that is a boot loop."
               % (starts, seconds))

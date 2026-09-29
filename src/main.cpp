@@ -94,6 +94,13 @@ diag::Sample vorlauf[diag::PRE_SAMPLES];
 size_t vorlaufKopf = 0;
 uint32_t vorlaufFuell = 0;
 
+// The hit under construction. It belongs to the sensor task and to nothing
+// else, and it lives here rather than on that task's stack: at 512 samples the
+// struct is over three kilobytes, and a local one overflowed a four kilobyte
+// stack on the first boot after the capture was enlarged. diag::hit copies it
+// into the queue, so reusing the same buffer is safe.
+diag::Hit rohling;
+
 // GPIO34 and GPIO35 are ADC1 channels 6 and 7. ADC1 is not a preference: ADC2
 // is unavailable while wifi is running.
 //
@@ -150,7 +157,7 @@ void sensorTask(void *) {
       // Logged, but nothing else changes. No peak window here on purpose: it
       // would cost thirty milliseconds of blindness that the old code did not
       // spend, and this change is meant to measure detection, not alter it.
-      diag::Hit h{};
+      diag::Hit &h = rohling;
       h.rallyId = rallyId;
       h.side = ' ';
       h.decision = sperre ? diag::Decision::Deadtime : diag::Decision::BelowThreshold;
@@ -170,7 +177,7 @@ void sensorTask(void *) {
     {
       // Follow both channels for FENSTER_MS and collect the peaks. The samples
       // are recorded on the way past — the loop is unchanged otherwise.
-      diag::Hit h{};
+      diag::Hit &h = rohling;
       uint16_t n = 0;
       for (size_t i = 0; i < diag::PRE_SAMPLES && n < diag::CAPTURE_SAMPLES; i++) {
         size_t k = (vorlaufKopf + i) % diag::PRE_SAMPLES;
@@ -640,7 +647,9 @@ void setup() {
   Serial.println("Start Game");
 
   queue = xQueueCreate(16, sizeof(Treffer));
-  xTaskCreatePinnedToCore(sensorTask, "sensor", 4096, NULL, 3, &sensorTaskHandle, 1);
+  // 4096 was enough while the capture was small. Room to spare is cheaper
+  // than another stack overflow found by a rollback.
+  xTaskCreatePinnedToCore(sensorTask, "sensor", 8192, NULL, 3, &sensorTaskHandle, 1);
 
   // Station on the configured network, our own access point if that does not
   // come up in time. Blocks for up to the timeout — deliberately, see net.cpp.
