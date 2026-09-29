@@ -39,14 +39,15 @@
 
 #include "config.h"
 #include "game.h"
+#include "net.h"
 #include "ota.h"
 #include "version.h"
 
 /* ================= configuration ================= */
 const int  PIN_A = ZW_PIN_A;
 const int  PIN_B = ZW_PIN_B;
-const char *AP_SSID = ZW_AP_SSID;
-const char *AP_PASS = ZW_AP_PASS;
+const char *AP_PREFIX = ZW_AP_SSID;   // the chip id is appended, see net.cpp
+const char *AP_PASS   = ZW_AP_PASS;
 
 volatile int schwelleA   = 300;
 volatile int schwelleB   = 300;
@@ -214,6 +215,12 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 .bar{height:6px;border-radius:3px;background:#E7ECF0;overflow:hidden;display:none}
 .bar>i{display:block;height:100%;width:0;background:var(--orange)}
 .msg{font-size:12px;color:var(--muted);min-height:16px}
+.net{display:flex;flex-direction:column;gap:8px}
+.net input[type=text],.net input[type=password]{width:100%;padding:9px;
+border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff}
+.ni{font:12px/1.7 ui-monospace,monospace;color:var(--muted)}
+.ni b{color:var(--ink)}
+.ni .warn{color:var(--orange)}
 </style></head><body><div class="wrap">
 
 <div class="board">
@@ -244,6 +251,21 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 </div>
 
 <div class="card"><h2>Protokoll</h2><div id="lg"></div></div>
+
+<div class="card"><h2>Netz</h2>
+  <div class="ni" id="ni">…</div>
+  <div class="net" style="margin-top:10px">
+    <label style="margin:0">WLAN-Name</label>
+    <input type="text" id="ws" autocomplete="off" placeholder="SSID">
+    <label style="margin:0">Passwort</label>
+    <input type="password" id="wp" autocomplete="off">
+    <label style="margin:0">Wartezeit, bis der eigene Accesspoint aufgeht —
+      <span class="val" id="lw">15</span> s</label>
+    <input type="range" id="rw" min="5" max="60" step="1" oninput="lw.textContent=rw.value">
+    <button onclick="netzSpeichern()">Speichern und neu starten</button>
+    <div class="msg" id="nm"></div>
+  </div>
+</div>
 
 <div class="card"><h2>Firmware einspielen</h2>
   <div class="up">
@@ -293,6 +315,29 @@ function tick(){
   }).catch(()=>{});
 }
 setInterval(tick,400);tick();
+function netLaden(){
+  fetch('/net').then(r=>r.json()).then(n=>{
+    ni.innerHTML =
+      (n.mode==='station'
+        ? 'Im WLAN <b>'+n.ssid+'</b>'
+        : 'Eigener Accesspoint <b>'+n.ssid+'</b>')
+      + '<br>Adresse <b>'+n.ip+'</b> &middot; <b>'+n.host+'</b>'
+      + '<br>Kanal <b>'+n.ch+'</b> <span class="warn">'
+      + '&mdash; ESP-NOW-Taster muessen auf diesem Kanal sitzen</span>';
+    if(!ws.value && n.mode==='station')ws.value=n.ssid;
+    rw.value=n.to; lw.textContent=n.to;
+  }).catch(()=>{});
+}
+function netzSpeichern(){
+  if(!ws.value){nm.textContent='Ohne WLAN-Namen geht es nicht.';return}
+  halt=Date.now()+30000;
+  const fertig='Gespeichert, das Board startet neu. Danach ist es im neuen WLAN '
+    +'zu erreichen &mdash; diese Seite hier nicht mehr. Klappt die Anmeldung '
+    +'nicht, spannt es nach der Wartezeit wieder seinen eigenen Accesspoint auf.';
+  fetch('/wifi',{method:'POST',
+    body:new URLSearchParams({ssid:ws.value,pass:wp.value,to:rw.value})})
+    .then(()=>{nm.innerHTML=fertig}).catch(()=>{nm.innerHTML=fertig});
+}
 function senden(){
   if(!uf.files.length){um.textContent='Erst eine .bin waehlen.';return}
   if(!up.value){um.textContent='Ohne Passwort geht es nicht.';return}
@@ -311,6 +356,7 @@ function senden(){
   x.onerror=()=>{um.textContent='Verbindung abgebrochen.';halt=0};
   x.send(fd);
 }
+netLaden();
 fetch('/version').then(r=>r.json()).then(v=>{
   ver.textContent=v.fw+' \u00b7 '+v.git;
   if(v.dirty)ver.classList.add('dirty');
@@ -363,6 +409,39 @@ void samplingFortsetzen() {
   Serial.println("[ota] sampling resumed");
 }
 
+// What the page needs to say which network the board is on — and the channel,
+// because ESP-NOW peers have to sit on it.
+void handleNet() {
+  String j = "{";
+  j += "\"mode\":\"" + String(net::modeName()) + "\"";
+  j += ",\"ssid\":\"" + jsonEscape(net::ssid()) + "\"";
+  j += ",\"ip\":\"" + net::ip().toString() + "\"";
+  j += ",\"ch\":" + String(net::channel());
+  j += ",\"host\":\"" + net::hostname() + ".local\"";
+  j += ",\"to\":" + String(net::staTimeout() / 1000);
+  j += "}";
+  server.send(200, "application/json", j);
+}
+
+// POST rather than GET: a password does not belong in a URL, where it would sit
+// in the browser history. Stored and applied on the next start — switching the
+// radio mid-request would drop the answer, and a wrong password would leave no
+// way back in. After a restart a wrong one lands in the access point.
+void handleWifi() {
+  if (server.hasArg("to")) {
+    long s = server.arg("to").toInt();
+    if (s >= 5 && s <= 120) net::setStaTimeout((uint32_t)s * 1000);
+  }
+  if (server.hasArg("ssid")) {
+    net::setCredentials(server.arg("ssid"), server.arg("pass"));
+    server.send(200, "text/plain", "Gespeichert. Neustart — der neue Stand gilt danach.\n");
+    delay(200);
+    ESP.restart();
+    return;
+  }
+  server.send(200, "text/plain", "ok");
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.printf("\nZaehlwerk %s  git %s\n", ZW_FW_VERSION, ZW_GIT_HASH);
@@ -371,14 +450,16 @@ void setup() {
   queue = xQueueCreate(16, sizeof(Treffer));
   xTaskCreatePinnedToCore(sensorTask, "sensor", 4096, NULL, 3, &sensorTaskHandle, 0);
 
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
-  Serial.print("AP up, address: ");
-  Serial.println(WiFi.softAPIP());   // 192.168.4.1
+  // Station on the configured network, our own access point if that does not
+  // come up in time. Blocks for up to the timeout — deliberately, see net.cpp.
+  net::begin({ ZW_HOSTNAME, AP_PREFIX, AP_PASS,
+               ZW_STA_SSID, ZW_STA_PASS, ZW_STA_TIMEOUT_MS });
 
   server.on("/", []{ server.send_P(200, "text/html", SEITE); });
   server.on("/state", handleState);
   server.on("/version", handleVersion);
+  server.on("/net", handleNet);
+  server.on("/wifi", HTTP_POST, handleWifi);
   server.on("/punkt", []{
     sichern(); rally = "";
     char s = server.arg("s") == "B" ? 'B' : 'A';
@@ -405,12 +486,13 @@ void setup() {
 // merely created.
 bool startWarSauber() {
   return webserverLaeuft
-      && WiFi.softAPIP() != IPAddress((uint32_t)0)
+      && net::ip() != IPAddress((uint32_t)0)
       && sensorTicks > 1000;
 }
 
 void loop() {
   server.handleClient();
+  net::tick();
   ota::handle();
   ota::tick(startWarSauber());
 

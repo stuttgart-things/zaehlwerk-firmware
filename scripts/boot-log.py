@@ -62,6 +62,10 @@ def main():
     lines = []
     for line in text.splitlines():
         clean = re.sub(r"[^\x20-\x7e]", "", line).strip()
+        # The noise arrives as a long run of x and spaces, and the first real
+        # line is often glued to the end of it. Cut the run off rather than
+        # dropping the line with it.
+        clean = re.sub(r"^[x ]{8,}", "", clean)
         if len(clean) > 3 and re.search(r"[A-Za-z]{3}", clean) \
                 and not re.fullmatch(r"[x ]+", clean):
             lines.append(clean)
