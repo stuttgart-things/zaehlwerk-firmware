@@ -113,12 +113,19 @@ const adc1_channel_t KANAL_A = ADC1_CHANNEL_6;
 const adc1_channel_t KANAL_B = ADC1_CHANNEL_7;
 
 void sensorTask(void *) {
-  // The same configuration analogRead() would apply, applied once instead of on
-  // every call. That is where the time went: 84 microseconds per read, measured,
-  // against a bounce that rises in tens.
-  adc1_config_width(ADC_WIDTH_BIT_12);
-  adc1_config_channel_atten(KANAL_A, ADC_ATTEN_DB_11);
-  adc1_config_channel_atten(KANAL_B, ADC_ATTEN_DB_11);
+  // Let the core attach the pins exactly as analogRead() would — width,
+  // attenuation, the touch peripheral off, and pinMode(pin, ANALOG), which is
+  // what routes the pad to the ADC at all. Reproducing that by hand read zeroes
+  // for a whole session: adc1_config_* alone is not enough, and the missing
+  // step was the one nobody writes down.
+  //
+  // After this, adc1_get_raw is the same read without the per-call
+  // reconfiguration analogRead does, which is where 84 microseconds per channel
+  // went against a bounce that rises in tens.
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
+  analogRead(ZW_PIN_A);
+  analogRead(ZW_PIN_B);
 
   // No watchdog call here, though a task that never yields looks like it needs
   // one. The Arduino core ships CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
