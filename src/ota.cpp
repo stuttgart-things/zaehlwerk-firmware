@@ -4,44 +4,44 @@
 #include <Update.h>
 #include <esp_ota_ops.h>
 
-// Der Arduino-Core würde ein frisch eingespieltes Image noch vor setup() als
-// gültig markieren. Damit wäre der Rollback Dekoration: bestätigt, bevor
-// irgendetwas geprüft wurde. Diese Überschreibung sagt dem Core, dass wir das
-// selbst entscheiden — sie muss extern "C" sein, weil das schwache Symbol aus
-// esp32-hal-misc.c kommt und ohne Header deklariert ist. Ohne extern "C"
-// erzeugt C++ einen anderen Namen, die Überschreibung greift nicht, und der
-// Fehler fällt erst beim Rollback-Test auf.
+// The Arduino core would mark a freshly uploaded image valid before setup()
+// runs. That would make the rollback decoration: confirmed before anything has
+// been checked. This override tells the core we decide that ourselves — and it
+// has to be extern "C", because the weak symbol comes from esp32-hal-misc.c
+// and is declared in no header. Without extern "C" the C++ name is mangled, the
+// override does not take, and the mistake only shows up as a rollback test that
+// passes for the wrong reason.
 extern "C" bool verifyRollbackLater() { return true; }
 
 namespace ota {
 namespace {
 
-// Wie lange ein neuer Stand fehlerfrei laufen muss, bevor er bestätigt wird.
-// Lang genug, dass WLAN, Webserver und Sensortask wirklich standen; kurz
-// genug, dass niemand darauf wartet.
-const uint32_t BEWAEHRUNG_MS = 10000;
+// How long a new build has to run without trouble before it is confirmed. Long
+// enough that wifi, the web server and the sensor task really stood up; short
+// enough that nobody waits for it.
+const uint32_t PROBATION_MS = 10000;
 
 WebServer *server_ = nullptr;
 Config cfg_{};
-bool aktiv_ = false;         // OTA überhaupt eingeschaltet?
-bool aufProbe_ = false;      // Image ist PENDING_VERIFY
-bool bestaetigt_ = false;
-int fortschritt_ = -1;
-bool abgelehnt_ = false;     // Web-Upload ohne Passwort
-bool webFehler_ = false;
+bool enabled_ = false;      // is OTA switched on at all?
+bool onProbation_ = false;  // the image is PENDING_VERIFY
+bool confirmed_ = false;
+int progress_ = -1;
+bool rejected_ = false;  // a web upload with no password
+bool webFailed_ = false;
 
-void log(const char *was) { Serial.printf("[ota] %s\n", was); }
+void log(const char *msg) { Serial.printf("[ota] %s\n", msg); }
 
-bool angemeldet() {
-  // Basic Auth über unverschlüsseltes HTTP. Das ist für ein Messgerät am
-  // eigenen Accesspoint angemessen und für nichts darüber hinaus.
+bool authorised() {
+  // Basic auth over unencrypted HTTP. That is proportionate for a measuring
+  // rig on its own access point and for nothing beyond it.
   return server_->authenticate("zaehlwerk", cfg_.password);
 }
 
-void updateBeginnt(int art) {
-  fortschritt_ = 0;
+void beginUpdate(int kind) {
+  progress_ = 0;
   if (cfg_.pause) cfg_.pause();
-  Update.begin(UPDATE_SIZE_UNKNOWN, art);
+  Update.begin(UPDATE_SIZE_UNKNOWN, kind);
 }
 
 void handleUpload() {
@@ -49,66 +49,69 @@ void handleUpload() {
 
   switch (up.status) {
     case UPLOAD_FILE_START: {
-      abgelehnt_ = false;
-      webFehler_ = false;
-      if (!aktiv_ || !angemeldet()) {
-        abgelehnt_ = true;
+      rejected_ = false;
+      webFailed_ = false;
+      if (!enabled_ || !authorised()) {
+        rejected_ = true;
         return;
       }
-      // Das Dateisystemabbild kommt über denselben Weg, nur in die andere
-      // Partition. Die Art steht im Pfad und nicht in einem Argument: bei
-      // einem Multipart-POST ersetzt der Formularparser die Query-Argumente,
-      // `uri()` bleibt stehen.
-      const int art = server_->uri().endsWith("fs") ? U_SPIFFS : U_FLASH;
-      Serial.printf("[ota] Web-Upload beginnt: %s (%s)\n", up.filename.c_str(),
-                    art == U_SPIFFS ? "Dateisystem" : "Firmware");
-      updateBeginnt(art);
+      // The filesystem image comes the same way, just into the other
+      // partition. Which kind it is sits in the path rather than in an
+      // argument: on a multipart POST the form parser replaces the query
+      // arguments, while uri() stays.
+      const int kind = server_->uri().endsWith("fs") ? U_SPIFFS : U_FLASH;
+      Serial.printf("[ota] web upload starting: %s (%s)\n", up.filename.c_str(),
+                    kind == U_SPIFFS ? "filesystem" : "firmware");
+      beginUpdate(kind);
       break;
     }
 
     case UPLOAD_FILE_WRITE:
-      if (abgelehnt_ || webFehler_) return;
+      if (rejected_ || webFailed_) return;
       if (Update.write(up.buf, up.currentSize) != up.currentSize) {
-        webFehler_ = true;
+        webFailed_ = true;
         Update.printError(Serial);
       }
       break;
 
     case UPLOAD_FILE_END:
-      if (abgelehnt_) return;
-      if (webFehler_ || !Update.end(true)) {
-        webFehler_ = true;
+      if (rejected_) return;
+      if (webFailed_ || !Update.end(true)) {
+        webFailed_ = true;
         Update.printError(Serial);
-        fortschritt_ = -1;
+        progress_ = -1;
         if (cfg_.resume) cfg_.resume();
         return;
       }
-      fortschritt_ = 100;
-      log("Web-Upload fertig");
+      progress_ = 100;
+      log("web upload done");
       break;
 
     default:
       // UPLOAD_FILE_ABORTED
-      if (!abgelehnt_) {
+      if (!rejected_) {
         Update.abort();
-        fortschritt_ = -1;
+        progress_ = -1;
         if (cfg_.resume) cfg_.resume();
-        log("Web-Upload abgebrochen");
+        log("web upload aborted");
       }
       break;
   }
 }
 
-void handleUploadFertig() {
-  if (!aktiv_) {
+// The bodies below are rendered inside the web UI, which is German. Serial
+// output is for whoever is working on the firmware and is English; what a
+// person reads in the browser is not.
+void handleUploadDone() {
+  if (!enabled_) {
     server_->send(503, "text/plain", "OTA ist aus: kein Passwort gesetzt.\n");
     return;
   }
-  if (abgelehnt_) {
+  if (rejected_) {
     server_->requestAuthentication();
     return;
   }
-  if (webFehler_) {
+  if (webFailed_) {
     server_->send(500, "text/plain", "Update fehlgeschlagen. Alter Stand laeuft weiter.\n");
     return;
   }
@@ -124,105 +127,105 @@ void begin(WebServer &server, const Config &cfg) {
   server_ = &server;
   cfg_ = cfg;
 
-  // Die Partitionszeile ist der einzige Weg, am Monitor zu erkennen, welches
-  // der beiden Images gerade läuft — Version und Git-Hash sind bei einem
-  // Rollback-Test auf beiden Slots identisch.
-  const esp_partition_t *laufend = esp_ota_get_running_partition();
-  esp_ota_img_states_t zustand = ESP_OTA_IMG_UNDEFINED;
-  const bool bekannt = laufend && esp_ota_get_state_partition(laufend, &zustand) == ESP_OK;
-  aufProbe_ = bekannt && zustand == ESP_OTA_IMG_PENDING_VERIFY;
-  if (bekannt && zustand == ESP_OTA_IMG_VALID) bestaetigt_ = true;
+  // The partition line is the only way to tell from the monitor which of the
+  // two images is running — in a rollback test the version and the git hash are
+  // identical on both slots.
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  const bool known = running && esp_ota_get_state_partition(running, &state) == ESP_OK;
+  onProbation_ = known && state == ESP_OTA_IMG_PENDING_VERIFY;
+  if (known && state == ESP_OTA_IMG_VALID) confirmed_ = true;
 
-  const char *wort = "unbekannt";
-  if (bekannt) switch (zustand) {
-    case ESP_OTA_IMG_NEW:            wort = "neu";                  break;
-    case ESP_OTA_IMG_PENDING_VERIFY: wort = "auf Probe";            break;
-    case ESP_OTA_IMG_VALID:          wort = "bestaetigt";           break;
-    case ESP_OTA_IMG_INVALID:        wort = "verworfen";            break;
-    case ESP_OTA_IMG_ABORTED:        wort = "abgebrochen";          break;
-    default:                         wort = "ohne Kennzeichnung";   break;
+  const char *word = "unknown";
+  if (known) switch (state) {
+    case ESP_OTA_IMG_NEW:            word = "new";           break;
+    case ESP_OTA_IMG_PENDING_VERIFY: word = "on probation";   break;
+    case ESP_OTA_IMG_VALID:          word = "confirmed";      break;
+    case ESP_OTA_IMG_INVALID:        word = "invalid";        break;
+    case ESP_OTA_IMG_ABORTED:        word = "aborted";        break;
+    default:                         word = "unmarked";       break;
   }
-  Serial.printf("[ota] laeuft aus %s, Image %s\n",
-                laufend ? laufend->label : "?", wort);
+  Serial.printf("[ota] running from %s, image %s\n",
+                running ? running->label : "?", word);
 
-  // Kein Passwort, kein OTA. Ein offener Update-Pfad auf einem fremden WLAN
-  // ist schlimmer als gar keiner — und die Meldung sagt, was zu tun ist.
+  // No password, no OTA. An open update path on a wifi you do not control is
+  // worse than none — and the message says what to do about it.
   if (cfg.password == nullptr || cfg.password[0] == '\0') {
-    log("aus: kein Passwort. secrets.ini anlegen (cp secrets.ini.example secrets.ini).");
-    server.on("/update", HTTP_POST, handleUploadFertig, handleUpload);
-    server.on("/updatefs", HTTP_POST, handleUploadFertig, handleUpload);
+    log("off: no password. Create secrets.ini (cp secrets.ini.example secrets.ini).");
+    server.on("/update", HTTP_POST, handleUploadDone, handleUpload);
+    server.on("/updatefs", HTTP_POST, handleUploadDone, handleUpload);
     return;
   }
-  aktiv_ = true;
+  enabled_ = true;
 
   ArduinoOTA.setHostname(cfg.hostname);
   ArduinoOTA.setPassword(cfg.password);
 
   ArduinoOTA.onStart([] {
-    fortschritt_ = 0;
-    Serial.printf("[ota] espota beginnt: %s\n",
-                  ArduinoOTA.getCommand() == U_SPIFFS ? "Dateisystem" : "Firmware");
-    // Nicht der Webserver hält hier auf, sondern das Sampling: während
-    // geschrieben wird, soll kein Task mehr Flash und CPU beanspruchen, und
-    // die laufende Session gehört sauber beendet statt einfach abgeschnitten.
+    progress_ = 0;
+    Serial.printf("[ota] espota starting: %s\n",
+                  ArduinoOTA.getCommand() == U_SPIFFS ? "filesystem" : "firmware");
+    // It is not the web server that gets in the way here but the sampling:
+    // while flash is being written nothing else should want flash and CPU, and
+    // the running session belongs ended cleanly rather than cut in half.
     if (cfg_.pause) cfg_.pause();
   });
-  ArduinoOTA.onProgress([](unsigned int jetzt, unsigned int gesamt) {
-    fortschritt_ = gesamt ? (int)((jetzt * 100ULL) / gesamt) : 0;
+  ArduinoOTA.onProgress([](unsigned int now, unsigned int total) {
+    progress_ = total ? (int)((now * 100ULL) / total) : 0;
   });
   ArduinoOTA.onEnd([] {
-    fortschritt_ = 100;
-    log("espota fertig, Neustart");
+    progress_ = 100;
+    log("espota done, restarting");
   });
-  ArduinoOTA.onError([](ota_error_t fehler) {
-    Serial.printf("[ota] Fehler %u, alter Stand laeuft weiter\n", fehler);
-    fortschritt_ = -1;
+  ArduinoOTA.onError([](ota_error_t err) {
+    Serial.printf("[ota] error %u, the previous build keeps running\n", err);
+    progress_ = -1;
     if (cfg_.resume) cfg_.resume();
   });
   ArduinoOTA.begin();
 
-  server.on("/update", HTTP_POST, handleUploadFertig, handleUpload);
-  server.on("/updatefs", HTTP_POST, handleUploadFertig, handleUpload);
-  log("bereit");
+  server.on("/update", HTTP_POST, handleUploadDone, handleUpload);
+  server.on("/updatefs", HTTP_POST, handleUploadDone, handleUpload);
+  log("ready");
 }
 
 void handle() {
-  if (aktiv_) ArduinoOTA.handle();
+  if (enabled_) ArduinoOTA.handle();
 }
 
 void tick(bool healthy) {
-  if (!aufProbe_ || bestaetigt_) return;
+  if (!onProbation_ || confirmed_) return;
 
 #ifdef OTA_TEST_CRASH
-  // Absichtlicher Absturz, um den Rollback zu prüfen. Nur auf einem Image, das
-  // auf Probe läuft — ein per USB geflashter Build mit diesem Flag würde sonst
-  // in einer Startschleife hängen, aus der ihn nichts holt.
+  // A deliberate crash, to test the rollback. Only on an image that is on
+  // probation — a build carrying this flag that was written over USB would
+  // otherwise hang in a boot loop nothing can pull it out of.
   if (millis() > 3000) {
-    log("OTA_TEST_CRASH: Absturz mit Absicht, der Bootloader rollt zurueck");
+    log("OTA_TEST_CRASH: crashing on purpose, the bootloader will roll back");
     delay(50);
     abort();
   }
 #endif
 
   if (!healthy) return;
-  if (millis() < BEWAEHRUNG_MS) return;
+  if (millis() < PROBATION_MS) return;
 
   if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
-    bestaetigt_ = true;
-    log("Start war sauber, Image bestaetigt");
+    confirmed_ = true;
+    log("start was clean, image confirmed");
   } else {
-    log("Image liess sich nicht bestaetigen");
+    log("could not confirm the image");
   }
 }
 
-bool enabled() { return aktiv_; }
+bool enabled() { return enabled_; }
 
 const char *imageState() {
-  if (bestaetigt_) return "valid";
-  if (aufProbe_) return "pending";
+  if (confirmed_) return "valid";
+  if (onProbation_) return "pending";
   return "n/a";
 }
 
-int progress() { return fortschritt_; }
+int progress() { return progress_; }
 
 }  // namespace ota

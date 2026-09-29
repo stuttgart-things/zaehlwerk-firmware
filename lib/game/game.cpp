@@ -19,8 +19,8 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
   Urteil u{' ', ""};
   if (folge.empty()) return u;
 
-  // Grundannahme: Wer zuletzt aufsetzen ließ, hat den Ball nicht mehr
-  // zurückbekommen — der Punkt geht an die andere Seite.
+  // The base assumption: whoever the ball last bounced on did not get it back,
+  // so the point goes to the other side.
   char letzte = folge[folge.length() - 1];
   u.gewinner  = andere(letzte);
 
@@ -31,12 +31,11 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
     if (folge[i] == folge[i - 1]) {
       u.hinweis = std::string("Doppelaufsetzer auf ") + folge[i] +
                   " — Ball nicht zurueckgespielt.";
-      // Zweimal hintereinander auf derselben Hälfte heißt: die Seite hat den
-      // Ball nicht zurückbekommen. Der Ballwechsel war hier zu Ende, der
-      // Punkt gehört der anderen Seite — und zwar unabhängig davon, was
-      // danach noch gemessen wurde. Genau deshalb steht der Zweig hier und
-      // nicht in der Grundannahme oben: wird der Ball nach dem zweiten
-      // Aufsetzer noch zurückgespielt, entscheidet trotzdem diese Stelle.
+      // Twice in a row on the same half means that side did not get the ball
+      // back. The rally ended here and the point belongs to the other side,
+      // whatever was measured afterwards. That is exactly why this branch
+      // exists rather than the base assumption above: if the ball is played on
+      // after the second bounce, this is still what decides.
       u.gewinner = andere(folge[i]);
       break;
     }

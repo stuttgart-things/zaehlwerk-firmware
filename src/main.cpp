@@ -1,27 +1,34 @@
 /*
-  Zählwerk — Piezo-Firmware
+  Zählwerk — piezo firmware
   --------------------------------------------------------------
-  Übernommen aus sketches/stufe2-zaehlwerk-mvp, Verhalten unverändert:
-  zwei Piezos an einem ESP32, komplette Zähllogik, Scoreboard als Webseite
-  über einen eigenen WLAN-Accesspoint. Kein Router nötig.
+  Carried over from sketches/stufe2-zaehlwerk-mvp with the behaviour unchanged:
+  two piezos on one ESP32, the full counting logic, and the scoreboard served
+  from an access point the board carries itself. No router needed.
 
-  Der Sketch bleibt unter sketches/ als Historie liegen. Gebaut und geflasht
-  wird ab hier über PlatformIO:
+  The sketch stays under sketches/ as the record. From here it is built and
+  flashed with PlatformIO:
 
-      pio run -e piezo -t upload
-      pio device monitor
+      task flash          (or: pio run -e piezo -t upload)
+      task monitor
 
   Hardware:
-    Piezo Hälfte A -> GPIO 34   (je mit 1 MΩ ∥, 100 kΩ Reihe, 2× 1N4148)
-    Piezo Hälfte B -> GPIO 35
+    piezo half A -> GPIO 34   (each with 1 MΩ ∥, 100 kΩ series, 2× 1N4148)
+    piezo half B -> GPIO 35
 
-  Bedienung:
-    WLAN "Zaehlwerk", Passwort aus secrets.ini, dann http://192.168.4.1
+  Use:
+    wifi "Zaehlwerk", password from secrets.ini, then http://192.168.4.1
 
-  Aufbau der Firmware:
-    Core 0  Sensortask, tastet beide Kanäle durch und meldet Ereignisse
-    Core 1  Webserver und Spiellogik
-  Die Trennung ist wichtig — sonst verschluckt der Webserver Aufsetzer.
+  Identifiers and the page stay German: the identifiers because this is a port
+  and they should still line up with the sketch line for line, the page because
+  a player reads it. Comments and serial output are English, like the rest of
+  the repository.
+
+  How the firmware is laid out:
+    core 0  sensor task, sweeps both channels and reports events
+    core 1  web server and game logic
+  That split matters — otherwise the web server swallows bounces. Note that the
+  sides are the wrong way round and ADR-0003 reverses them: the wifi task lives
+  on core 0 too. Until #10 lands, this is the sketch's arrangement.
 */
 
 #include <Arduino.h>
@@ -35,7 +42,7 @@
 #include "ota.h"
 #include "version.h"
 
-/* ================= Konfiguration ================= */
+/* ================= configuration ================= */
 const int  PIN_A = ZW_PIN_A;
 const int  PIN_B = ZW_PIN_B;
 const char *AP_SSID = ZW_AP_SSID;
@@ -48,14 +55,14 @@ volatile int rallyTimeout = 1500;   // ms Stille = Ballwechsel vorbei
 const int SPERRE_MS  = 60;          // Nachklingen
 const int FENSTER_MS = 30;          // Vergleichsfenster zwischen den Kanälen
 
-/* ================= Sensortask ================= */
+/* ================= sensor task ================= */
 struct Treffer { char seite; int spitzeA; int spitzeB; uint32_t t; };
 QueueHandle_t queue;
 
-// Handle, um das Sampling während eines Updates anzuhalten, und ein Zähler,
-// an dem sich von außen ablesen lässt, dass der Task wirklich läuft. Beides
-// braucht der Rollback: ohne einen Lebensbeweis des Sensortasks wäre ein
-// Image "sauber gestartet", das nur nicht mehr messen kann.
+// A handle, to suspend sampling while an update is written, and a counter that
+// lets anything outside see the task is really running. The rollback needs
+// both: with no sign of life from the sensor task, an image that boots but can
+// no longer measure would count as "started cleanly".
 TaskHandle_t sensorTaskHandle = nullptr;
 volatile uint32_t sensorTicks = 0;
 
@@ -72,7 +79,7 @@ void sensorTask(void *) {
     int b = analogRead(PIN_B);
 
     if (a >= schwelleA || b >= schwelleB) {
-      // Beide Kanäle für FENSTER_MS verfolgen und die Spitzen sammeln.
+      // Follow both channels for FENSTER_MS and collect the peaks.
       uint32_t start = millis();
       int spA = a, spB = b;
       while (millis() - start < (uint32_t)FENSTER_MS) {
@@ -80,8 +87,8 @@ void sensorTask(void *) {
         int vb = analogRead(PIN_B); if (vb > spB) spB = vb;
       }
 
-      // Relativ zur jeweiligen Schwelle vergleichen — die Kanäle
-      // sind nie exakt gleich empfindlich.
+      // Compare against each channel's own threshold — the two are never
+      // exactly equally sensitive.
       float relA = (float)spA / (float)schwelleA;
       float relB = (float)spB / (float)schwelleB;
 
@@ -99,7 +106,7 @@ void sensorTask(void *) {
   }
 }
 
-/* ================= Spielzustand ================= */
+/* ================= game state ================= */
 struct Eintrag { String folge; String urteil; String hinweis; };
 
 int   punkteA = 0, punkteB = 0;
@@ -164,7 +171,7 @@ void neuesSpiel() {
   aufschlag = ersterAufschlag; rally = ""; logAnzahl = 0; verlaufN = 0;
 }
 
-/* ================= Webserver ================= */
+/* ================= web server ================= */
 WebServer server(80);
 bool webserverLaeuft = false;
 
@@ -340,20 +347,20 @@ void handleVersion() {
   server.send(200, "application/json", j);
 }
 
-// Ein Update schreibt in den zweiten App-Slot. Währenddessen soll kein Task
-// mehr Flash und CPU beanspruchen, und die laufende Partie gehört beendet und
-// nicht mitten im Ballwechsel abgeschnitten. Das Session-Ende als Log-Ereignis
-// kommt mit #15; hier ist es vorerst die serielle Zeile.
+// An update writes into the second app slot. While that happens no task should
+// be wanting flash and CPU, and the running game belongs ended rather than cut
+// off mid-rally. The session end as a log event comes with #15; for now it is
+// the serial line.
 void samplingAnhalten() {
   if (sensorTaskHandle) vTaskSuspend(sensorTaskHandle);
   if (rally.length() > 0) rallyBeenden();
   xQueueReset(queue);
-  Serial.println("[ota] Sampling angehalten, Session beendet");
+  Serial.println("[ota] sampling suspended, session ended");
 }
 
 void samplingFortsetzen() {
   if (sensorTaskHandle) vTaskResume(sensorTaskHandle);
-  Serial.println("[ota] Sampling laeuft weiter");
+  Serial.println("[ota] sampling resumed");
 }
 
 void setup() {
@@ -366,7 +373,7 @@ void setup() {
 
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASS);
-  Serial.print("AP laeuft, Adresse: ");
+  Serial.print("AP up, address: ");
   Serial.println(WiFi.softAPIP());   // 192.168.4.1
 
   server.on("/", []{ server.send_P(200, "text/html", SEITE); });
@@ -392,10 +399,10 @@ void setup() {
   ota::begin(server, { ZW_HOSTNAME, ZW_OTA_PASS, samplingAnhalten, samplingFortsetzen });
 }
 
-// Das Urteil über den eigenen Start, auf das der Rollback hört. Absichtlich
-// mehr als "setup() ist durchgelaufen": das WLAN steht, der Webserver hört zu,
-// und der Sensortask ist oft genug durch seine Schleife gekommen, dass er
-// nicht bloß erzeugt, sondern am Laufen ist.
+// The verdict on our own start that the rollback listens to. Deliberately more
+// than "setup() returned": wifi is up, the web server is listening, and the
+// sensor task has been round its loop often enough to be running rather than
+// merely created.
 bool startWarSauber() {
   return webserverLaeuft
       && WiFi.softAPIP() != IPAddress((uint32_t)0)
@@ -413,7 +420,7 @@ void loop() {
     if (rally.length() == 0) sichern();
     rally += t.seite;
     letzterTreffer = t.t;
-    Serial.printf("Treffer %c!    A:%d B:%d\n", t.seite, t.spitzeA, t.spitzeB);
+    Serial.printf("hit %c    A:%d B:%d\n", t.seite, t.spitzeA, t.spitzeB);
   }
 
   if (rally.length() > 0 && millis() - letzterTreffer > (uint32_t)rallyTimeout)
