@@ -1,6 +1,6 @@
 # 6. The firmware owns the table half to player mapping
 
-Status: Proposed
+Status: Accepted
 Date: 2026-09-29
 
 ## Context

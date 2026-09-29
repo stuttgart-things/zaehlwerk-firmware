@@ -77,8 +77,7 @@ discards all but the first as duplicates — see
 | [0005](docs/adr/0005-labels-are-append-only-records.md) | Labels are append-only records that point at events |
 | [0006](docs/adr/0006-the-firmware-owns-the-half-to-player-mapping.md) | The firmware owns the table half to player mapping |
 
-0002 to 0006 are proposed, not accepted. What the events look like once they
-are: [docs/event-schema.md](docs/event-schema.md).
+What the events look like: [docs/event-schema.md](docs/event-schema.md).
 
 ## Piezo bring-up — Stufe 1 and 2
 
@@ -113,8 +112,12 @@ and the Arduino IDE is no longer part of the workflow.
   carried over verbatim into `src/main.cpp`, with the rules split out into
   `lib/game` so they can be tested off the board
 
-Sensing runs as its own task pinned to core 0 in stage 2; the web server on core
-1 would otherwise swallow bounces. Keep that split.
+Sensing runs as its own task, so the web server cannot swallow bounces. Stage 2
+pins it to core 0 and that is the wrong core — the wifi and lwIP tasks live
+there too, so the split protects the sampler from the web server and hands it to
+the radio. [ADR-0003](docs/adr/0003-sampling-on-core-1.md) moves it to core 1.
+The firmware still does the old thing until [#10](../../issues/10) lands; keep
+the split, swap the sides.
 
 ## Status
 

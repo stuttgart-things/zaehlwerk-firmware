@@ -82,6 +82,14 @@ switch between mock and real play, and before an OTA update.
 `manual`. Nothing downstream may assume a session ended cleanly — a power cut
 looks like a session that simply stops.
 
+`sample_rate_hz` above is a placeholder, not a decided number. What the ADC
+sustains on two channels has to be measured before anything relies on it; the
+field is in the schema because the rate has to be recorded, whatever it turns
+out to be.
+
+`v` is bumped when a field changes meaning. Adding a field does not bump it, so
+a reader has to tolerate fields it does not know.
+
 ## `param` — a knob moved
 
 Every change to any value in `params`, whoever made it. A tuning session is

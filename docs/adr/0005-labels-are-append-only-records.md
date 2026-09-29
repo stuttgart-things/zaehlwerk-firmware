@@ -1,6 +1,6 @@
 # 5. Labels are append-only records that point at events
 
-Status: Proposed
+Status: Accepted
 Date: 2026-09-29
 
 ## Context

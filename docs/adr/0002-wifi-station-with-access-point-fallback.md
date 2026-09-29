@@ -1,6 +1,6 @@
 # 2. Wifi station with an access point fallback
 
-Status: Proposed
+Status: Accepted
 Date: 2026-09-29
 
 ## Context

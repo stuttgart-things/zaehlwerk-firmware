@@ -1,6 +1,6 @@
 # 3. Sampling on core 1, everything else on core 0
 
-Status: Proposed
+Status: Accepted
 Date: 2026-09-29
 
 ## Context
@@ -46,9 +46,10 @@ time only governs whether a crossing is *counted*, not whether it is *seen*.
 
 ## Consequences
 
-- The README and `docs/piezo-stufe-1-2.md` both tell the reader to keep the
-  sampler on core 0. Both have to be corrected in the same change, or the next
-  person moves it back for a documented reason.
+- The README and `docs/piezo-stufe-1-2.md` both told the reader to keep the
+  sampler on core 0. Both now point here instead, and both say that the
+  firmware still does the old thing until the change lands — a document that
+  described the intent as if it were the code would be its own kind of wrong.
 - A continuously sampling task on core 1 leaves that core to it. Anything else
   that wants core 1 has to justify itself.
 - Sampling through the dead time is what makes the pre-trigger ring buffer and

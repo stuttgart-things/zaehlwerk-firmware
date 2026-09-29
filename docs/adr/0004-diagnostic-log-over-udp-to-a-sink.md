@@ -1,6 +1,6 @@
 # 4. Diagnostic log over UDP to a sink, beside the API path
 
-Status: Proposed
+Status: Accepted
 Date: 2026-09-29
 
 ## Context

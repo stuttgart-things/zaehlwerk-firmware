@@ -512,8 +512,13 @@ Keep it short, twist it. Check first whether the 1 MΩ is really seated.
 neighbouring hole. Tap directly on the disc first, to separate coupling from
 wiring.
 
-**In Stage 2 bounces get swallowed.** The sketch samples in its own task on core
-0 so the web server cannot get in the way. Please do not undo that split.
+**In Stage 2 bounces get swallowed.** The sketch samples in its own task so the
+web server cannot get in the way. Do not undo that split — but note the sketch
+puts the sampler on core 0, which is also where the wifi task runs. The firmware
+moves it to core 1 ([ADR-0003](adr/0003-sampling-on-core-1.md)). Two further
+causes matter more than the core and are fixed there as well: between hits the
+sketch samples once per millisecond, and after every detected hit it does not
+sample at all for 90 ms.
 
 **Both channels see every bounce.** Normal on single-piece tables. The sketch
 takes the louder one within 30 ms.
