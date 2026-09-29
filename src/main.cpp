@@ -247,7 +247,8 @@ void logEintragen(String folge, String urteil, String hinweis) {
   log_[logAnzahl++] = { folge, urteil, hinweis };
 }
 
-void punktGeben(char gewinner, String folge, String hinweis, const char *grund) {
+void punktGeben(char gewinner, String folge, String hinweis, const char *grund,
+                const String &marke = "", const String &kommentar = "") {
   const int vorA = punkteA, vorB = punkteB;
   const char vorAufschlag = aufschlag;
 
@@ -257,7 +258,8 @@ void punktGeben(char gewinner, String folge, String hinweis, const char *grund) 
   logEintragen(folge, String("Punkt fuer ") + gewinner, hinweis);
 
   diag::point(++pointId, rallyId, grund, hinweis, gewinner,
-              vorA, vorB, vorAufschlag, punkteA, punkteB, aufschlag, vorbei);
+              vorA, vorB, vorAufschlag, punkteA, punkteB, aufschlag, vorbei,
+              marke, kommentar);
 }
 
 void rallyBeenden() {
@@ -272,7 +274,7 @@ void rallyBeenden() {
   punktGeben(u.gewinner, folge, String(u.hinweis.c_str()), u.grund);
 }
 
-void zurueck() {
+void zurueck(const String &marke = "", const String &kommentar = "") {
   if (verlaufN == 0) return;
   const int vorA = punkteA, vorB = punkteB;
   const char vorAufschlag = aufschlag;
@@ -282,7 +284,8 @@ void zurueck() {
   logAnzahl = s.logN;
   rally = "";
   diag::point(++pointId, rallyId, "undo", "", ' ',
-              vorA, vorB, vorAufschlag, punkteA, punkteB, aufschlag, vorbei);
+              vorA, vorB, vorAufschlag, punkteA, punkteB, aufschlag, vorbei,
+              marke, kommentar);
 }
 
 void neuesSpiel() {
@@ -333,6 +336,12 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 .bar{height:6px;border-radius:3px;background:#E7ECF0;overflow:hidden;display:none}
 .bar>i{display:block;height:100%;width:0;background:var(--orange)}
 .msg{font-size:12px;color:var(--muted);min-height:16px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.tag{padding:5px 11px;border:1px solid var(--line);border-radius:14px;
+font-size:12px;background:#fff;cursor:pointer;user-select:none;color:var(--muted)}
+.tag.on{background:var(--orange);border-color:var(--orange);color:#fff}
+.kom{width:100%;padding:9px;border:1px solid var(--line);border-radius:6px;
+font:13px inherit;background:#fff;margin-bottom:8px}
 .net{display:flex;flex-direction:column;gap:8px}
 .net input[type=text],.net input[type=password]{width:100%;padding:9px;
 border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff}
@@ -349,6 +358,17 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 </div>
 
 <div class="card"><h2>Korrektur</h2>
+  <div class="tags">
+    <div class="tag" data-v="missed"      onclick="marke('missed')">nicht erkannt</div>
+    <div class="tag" data-v="wrong_side"  onclick="marke('wrong_side')">falsche Seite</div>
+    <div class="tag" data-v="ghost"       onclick="marke('ghost')">Geistertreffer</div>
+    <div class="tag" data-v="net"         onclick="marke('net')">Netz</div>
+    <div class="tag" data-v="edge"        onclick="marke('edge')">Kante</div>
+    <div class="tag" data-v="bat_or_body" onclick="marke('bat_or_body')">Schlaeger/Koerper</div>
+    <div class="tag" data-v="let"         onclick="marke('let')">Let</div>
+    <div class="tag" data-v="other"       onclick="marke('other')">Sonstiges</div>
+  </div>
+  <input class="kom" id="kom" placeholder="Was ist passiert? (optional)" autocomplete="off">
   <div class="row">
     <button onclick="go('/punkt?s=A')">Punkt A</button>
     <button onclick="go('/punkt?s=B')">Punkt B</button>
@@ -419,7 +439,27 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 
 </div><script>
 let halt=0;
-function go(u){halt=Date.now()+400;fetch(u).then(tick)}
+// The tag and the note belong to the next correction and are cleared after it.
+// Asking afterwards does not work: at the moment you press the button you know
+// why, and two minutes later you do not.
+let gewaehlt='';
+function marke(v){
+  gewaehlt = (gewaehlt===v) ? '' : v;
+  document.querySelectorAll('.tag').forEach(t=>
+    t.classList.toggle('on', t.dataset.v===gewaehlt));
+}
+function go(u){
+  const q=new URLSearchParams();
+  if(gewaehlt)q.set('tag',gewaehlt);
+  if(kom.value)q.set('note',kom.value);
+  const s=q.toString();
+  halt=Date.now()+400;
+  fetch(u + (s ? (u.includes('?')?'&':'?')+s : '')).then(()=>{
+    gewaehlt=''; kom.value='';
+    document.querySelectorAll('.tag').forEach(t=>t.classList.remove('on'));
+    tick();
+  });
+}
 function cfg(){
   const a=ra.value,b=rb.value,t=rt.value;
   la.textContent=a;lb.textContent=b;lt.textContent=t;
@@ -635,10 +675,14 @@ void setup() {
   server.on("/punkt", []{
     sichern(); rally = "";
     char s = server.arg("s") == "B" ? 'B' : 'A';
-    punktGeben(s, "", "Manuell vergeben.", "manual");
+    punktGeben(s, "", "Manuell vergeben.", "manual",
+               server.arg("tag"), server.arg("note"));
     server.send(200, "text/plain", "ok");
   });
-  server.on("/zurueck", []{ zurueck(); server.send(200, "text/plain", "ok"); });
+  server.on("/zurueck", []{
+    zurueck(server.arg("tag"), server.arg("note"));
+    server.send(200, "text/plain", "ok");
+  });
   server.on("/neu",     []{ neuesSpiel(); server.send(200, "text/plain", "ok"); });
   server.on("/cfg", []{
     auto setzen = [](const char *arg, const char *name, volatile int &ziel) {

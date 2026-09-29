@@ -81,9 +81,14 @@ void hit(const Hit &h);
 // These run on the scoring side, which is already off the sampler.
 void rallyStart(uint32_t rallyId);
 void rallyEnd(uint32_t rallyId, const String &sequence, const char *closedBy);
+// tag and note are what a person said at the moment of a correction. The tag
+// comes from a fixed vocabulary so the sink can group by it — free text does
+// not cluster, and finding what a game had in common is the whole reason for
+// asking. The note is for the one case the vocabulary does not cover.
 void point(uint32_t pointId, uint32_t rallyId, const String &reason,
            const String &hint, char side, int fromA, int fromB, char fromServe,
-           int toA, int toB, char toServe, bool over);
+           int toA, int toB, char toServe, bool over,
+           const String &tag, const String &note);
 void param(const char *name, const String &from, const String &to, const char *by);
 void note(const char *level, const String &text);
 

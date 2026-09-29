@@ -51,6 +51,8 @@ type viewEvent struct {
 	Counted  bool
 	Samples  int
 	RecvAt   string
+	Tag      string
+	Note     string
 	Raw      []byte
 }
 
@@ -96,6 +98,8 @@ func readSession(path string) ([]viewEvent, sessionParams, error) {
 			PeakB    int     `json:"peak_b"`
 			Counted  bool    `json:"counted"`
 			RecvAt   string  `json:"recv_at"`
+			Tag      string  `json:"tag"`
+			Note     string  `json:"note"`
 			Samples  struct {
 				N int `json:"n"`
 			} `json:"samples"`
@@ -104,6 +108,7 @@ func readSession(path string) ([]viewEvent, sessionParams, error) {
 			ev.Decision, ev.Ratio = extra.Decision, extra.Ratio
 			ev.PeakA, ev.PeakB, ev.Counted = extra.PeakA, extra.PeakB, extra.Counted
 			ev.RecvAt, ev.Samples = extra.RecvAt, extra.Samples.N
+			ev.Tag, ev.Note = extra.Tag, extra.Note
 			if extra.Side != nil {
 				ev.Side = *extra.Side
 			}
@@ -176,7 +181,7 @@ func serveViewer(addr, dir string, sink *Sink) {
 				html.EscapeString(name), f, label)
 		}
 		b.WriteString(`</div><div class=card><table>
-<tr><th>seq</th><th>type</th><th>decision</th><th>side</th><th>peak A</th><th>peak B</th><th>ratio</th><th>samples</th><th></th></tr>`)
+<tr><th>seq</th><th>type</th><th>decision</th><th>side</th><th>peak A</th><th>peak B</th><th>ratio</th><th>samples</th><th>tag</th><th>note</th><th></th></tr>`)
 
 		shown := 0
 		for _, e := range evs {
@@ -197,12 +202,18 @@ func serveViewer(addr, dir string, sink *Sink) {
 			if cls == "" {
 				cls = "below_threshold"
 			}
+			tag := ""
+			if e.Tag != "" {
+				tag = `<span class="pill ambiguous">` + html.EscapeString(e.Tag) + `</span>`
+			}
 			fmt.Fprintf(&b,
 				`<tr><td>%d</td><td>%s</td><td><span class="pill %s">%s</span></td>
-<td>%s</td><td>%d</td><td>%d</td><td>%.2f</td><td>%d</td><td>%s</td></tr>`,
+<td>%s</td><td>%d</td><td>%d</td><td>%.2f</td><td>%d</td><td>%s</td>
+<td style="white-space:normal;max-width:260px">%s</td><td>%s</td></tr>`,
 				e.Seq, html.EscapeString(e.Type), html.EscapeString(cls),
 				html.EscapeString(e.Decision), html.EscapeString(e.Side),
-				e.PeakA, e.PeakB, e.Ratio, e.Samples, link)
+				e.PeakA, e.PeakB, e.Ratio, e.Samples, tag,
+				html.EscapeString(e.Note), link)
 		}
 		b.WriteString("</table>")
 		if shown >= 500 {
