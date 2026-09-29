@@ -32,6 +32,11 @@ void playRally();
 void setAutoplay(bool on);
 bool autoplay();
 
+// Pausing holds the queue where it is rather than throwing it away, so
+// resuming continues the rally that was being played instead of starting over.
+void setPaused(bool p);
+bool paused();
+
 // Drives the queue. Belongs next to the web server, not in the sampler.
 void tick();
 

@@ -250,6 +250,21 @@ enum class Simulation { Aus, Dauerhaft, EinSpiel, EinMatch };
 Simulation simulation = Simulation::Aus;
 uint32_t spielEndeMs = 0;
 
+// Correcting something that is still being generated does not work: the next
+// rally scores over it before anybody can look. So a correction pauses, the way
+// a debugger does — the run is held, not thrown away, and carrying on is a
+// deliberate press.
+void pausieren() {
+  if (simulation == Simulation::Aus || mock::paused()) return;
+  mock::setPaused(true);
+  spielEndeMs = 0;
+}
+
+void weiter() {
+  if (simulation == Simulation::Aus) return;
+  mock::setPaused(false);
+}
+
 int spielerAn(char seite) { return seiteZuSpieler[seite == 'A' ? 0 : 1]; }
 
 // The name to show for a half, or the half's own letter when nobody was named.
@@ -323,7 +338,21 @@ void rallyBeenden() {
   punktGeben(u.gewinner, folge, String(u.hinweis.c_str()), u.grund);
 }
 
+// Taking back means taking back a point. Nothing else is what somebody reaching
+// for this button wants.
+//
+// A rally in progress has a snapshot of its own, taken when it started — which
+// is the score as it stands right now. Popping only that changed no number and
+// read as a button that did nothing, which is exactly how it felt while a
+// simulation was running. So an unfinished rally is discarded first and the
+// point behind it is taken back after.
 void zurueck(const String &marke = "", const String &kommentar = "") {
+  if (rally.length() > 0) {
+    if (verlaufN > 0) verlaufN--;
+    diag::rallyEnd(rallyId, rally, "discarded");
+    rally = "";
+    rallyOffen = false;
+  }
   if (verlaufN == 0) return;
   const int vorA = punkteA, vorB = punkteB;
   const char vorAufschlag = aufschlag;
@@ -478,6 +507,9 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 </div>
 
 <div class="card"><h2>Korrektur</h2>
+  <div class="row" id="tr" style="display:none;margin-bottom:10px">
+    <button id="tb" onclick="transport()">Pause</button>
+  </div>
   <div class="tags">
     <div class="tag" data-v="missed"      onclick="marke('missed')">nicht erkannt</div>
     <div class="tag" data-v="wrong_side"  onclick="marke('wrong_side')">falsche Seite</div>
@@ -642,9 +674,10 @@ function tick(){
     wn.textContent=d.over?('Sieger: '+(d.winner=='A'?d.na:d.nb)):'';
     bpa.textContent='Punkt '+d.na; bpb.textContent='Punkt '+d.nb;
     if(d.mock!==mockAn || d.auto!==autoAn) mockZeigen(d);
-    simAn = d.sim;
+    simAn = d.sim; simPause = d.pause; transportZeigen();
     const namen=['','laeuft dauerhaft','spielt ein Spiel','spielt ein Match'];
-    ms2.textContent = d.sim ? ('Simulation '+namen[d.sim]+'. Saetze '+d.sa+':'+d.sb+'.')
+    ms2.textContent = d.sim ? ('Simulation '+namen[d.sim]+(d.pause?' (pausiert)':'')
+                               +'. Saetze '+d.sa+':'+d.sb+'.')
                             : (d.sa||d.sb ? 'Match beendet. Saetze '+d.sa+':'+d.sb+'.' : '');
     mg.textContent  = d.sim===2 ? 'Anhalten' : 'Ein Spiel';
     mmm.textContent = d.sim===3 ? 'Anhalten' : 'Ein Match (best of 5)';
@@ -714,11 +747,31 @@ function seiten(){
   }).catch(()=>{});
 }
 let mockAn=false, autoAn=false;
+let simPause=false;
+function transport(){
+  halt=Date.now()+300;
+  fetch('/mock?t='+(simPause?'play':'pause')).then(r=>r.json()).then(d=>{
+    mockZeigen(d); tick();
+  }).catch(()=>{});
+}
 function mockZeigen(d){
   mockAn=d.mock; autoAn=d.auto;
+  if(d.sim!==undefined){simAn=d.sim; simPause=d.pause; transportZeigen()}
   mb.classList.toggle('on', mockAn);
   mt.style.display = mockAn ? 'block' : 'none';
   mq.textContent = mockAn ? 'Zurueck auf echtes Spiel' : 'Auf Mock umschalten';
+}
+function transportZeigen(){
+  tr.style.display = simAn ? 'flex' : 'none';
+  tb.textContent = simPause ? '\u25B6  Weiter' : '\u23F8  Pause';
+  tb.className = simPause ? '' : 'warn';
+  mb.textContent = '';
+  mb.insertAdjacentHTML('beforeend', mockAn
+    ? ('MOCK \u2014 die Treffer sind erfunden'
+       + (simAn ? (simPause ? ' \u00b7 pausiert' : ' \u00b7 laeuft') : '')
+       + '<small>Kein Piezo, kein Ball. Sitzungen aus diesem Modus tragen '
+       + '<code>sensor: mock</code>.</small>')
+    : '');
 }
 function mtrig(t,s){halt=Date.now()+300;
   fetch('/mock?t='+t+'&s='+s).then(r=>r.json()).then(mockZeigen).catch(()=>{})}
@@ -809,6 +862,7 @@ void handleState() {
   j += ",\"mock\":" + String(mock::on() ? "true" : "false");
   j += ",\"auto\":" + String(mock::autoplay() ? "true" : "false");
   j += ",\"sim\":" + String((int)simulation);
+  j += ",\"pause\":" + String(mock::paused() ? "true" : "false");
   j += ",\"sa\":" + String(saetze[spielerAn('A')]);
   j += ",\"sb\":" + String(saetze[spielerAn('B')]);
   j += ",\"img\":\"" + String(ota::imageState()) + "\"";
@@ -922,6 +976,7 @@ void setup() {
   server.on("/net", handleNet);
   server.on("/wifi", HTTP_POST, handleWifi);
   server.on("/punkt", []{
+    pausieren();
     sichern(); rally = "";
     char s = server.arg("s") == "B" ? 'B' : 'A';
     punktGeben(s, "", "Manuell vergeben.", "manual",
@@ -929,6 +984,7 @@ void setup() {
     server.send(200, "text/plain", "ok");
   });
   server.on("/zurueck", []{
+    pausieren();
     zurueck(server.arg("tag"), server.arg("note"));
     server.send(200, "text/plain", "ok");
   });
@@ -991,6 +1047,10 @@ void setup() {
       }
     } else if (t == "rally") {
       mock::playRally();
+    } else if (t == "pause") {
+      pausieren();
+    } else if (t == "play") {
+      weiter();
     } else if (t == "auto" || t == "game" || t == "match") {
       const bool an = server.arg("on") != "0";
       if (!an) {
@@ -1002,6 +1062,7 @@ void setup() {
         if (t != "auto") neuesSpiel();
       }
       mock::setAutoplay(an);
+      mock::setPaused(false);
       spielEndeMs = 0;
     } else if (t.length()) {
       const char s = server.arg("s") == "B" ? 'B' : 'A';
@@ -1013,7 +1074,9 @@ void setup() {
     }
     server.send(200, "application/json",
                 String("{\"mock\":") + (mock::on() ? "true" : "false") +
-                ",\"auto\":" + (mock::autoplay() ? "true" : "false") + "}");
+                ",\"auto\":" + (mock::autoplay() ? "true" : "false") +
+                ",\"sim\":" + String((int)simulation) +
+                ",\"pause\":" + (mock::paused() ? "true" : "false") + "}");
   });
 
   server.on("/seiten", []{
@@ -1059,7 +1122,10 @@ bool startWarSauber() {
 // couple of seconds first, so somebody watching the page sees the final score
 // rather than a number that jumps.
 void simulationTreiben() {
-  if (simulation == Simulation::Aus || !vorbei) { spielEndeMs = 0; return; }
+  if (simulation == Simulation::Aus || mock::paused() || !vorbei) {
+    spielEndeMs = 0;
+    return;
+  }
   if (!spielEndeMs) { spielEndeMs = millis(); return; }
   if (millis() - spielEndeMs < 2500) return;
   spielEndeMs = 0;

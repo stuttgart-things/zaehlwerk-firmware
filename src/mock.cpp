@@ -19,6 +19,7 @@ const float FREQ_HZ = 1400.0f;
 
 bool an_ = false;
 bool autoplay_ = false;
+bool pausiert_ = false;
 
 // The event in flight, as separate volatile scalars rather than a struct.
 // The web server writes it on core 0 and the sampler reads it on core 1, and a
@@ -71,6 +72,7 @@ bool on() { return an_; }
 void setOn(bool on) {
   an_ = on;
   autoplay_ = false;
+  pausiert_ = false;
   planN_ = planI_ = 0;
   Preferences p;
   p.begin(NVS_ZW, false);
@@ -154,8 +156,11 @@ void setAutoplay(bool on) {
 
 bool autoplay() { return autoplay_; }
 
+void setPaused(bool p) { pausiert_ = p; }
+bool paused() { return pausiert_; }
+
 void tick() {
-  if (!an_) return;
+  if (!an_ || pausiert_) return;
   const uint32_t jetzt = millis();
   while (planI_ < planN_ && jetzt >= plan_[planI_].wannMs) {
     trigger(plan_[planI_].art, plan_[planI_].seite);
