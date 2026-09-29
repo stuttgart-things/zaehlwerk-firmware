@@ -217,7 +217,8 @@ void rallyEnd(uint32_t rallyId, const String &sequence, const char *closedBy) {
 void point(uint32_t pointId, uint32_t rallyId, const String &reason,
            const String &hint, char side, int fromA, int fromB, char fromServe,
            int toA, int toB, char toServe, bool over,
-           const String &tag, const String &note) {
+           const String &tag, const String &note,
+           const String &player, const String &playerName) {
   String f = String(",\"point_id\":\"") + sessionId_ + "-p" + pointId + "\"";
   f += String(",\"rally_id\":\"") + sessionId_ + "-r" + rallyId + "\"";
   f += ",\"reason\":\"" + esc(reason) + "\"";
@@ -227,9 +228,21 @@ void point(uint32_t pointId, uint32_t rallyId, const String &reason,
        ",\"serve\":\"" + String(fromServe) + "\"}";
   f += ",\"to\":{\"a\":" + String(toA) + ",\"b\":" + String(toB) + ",\"serve\":\"" +
        String(toServe) + "\",\"over\":" + (over ? "true" : "false") + "}";
+  if (player.length()) f += ",\"player\":\"" + esc(player) + "\"";
+  if (playerName.length()) f += ",\"player_name\":\"" + esc(playerName) + "\"";
   if (tag.length()) f += ",\"tag\":\"" + esc(tag) + "\"";
   if (note.length()) f += ",\"note\":\"" + esc(note) + "\"";
   emitNow("point", f);
+}
+
+void match(const char *phase, const String &nameA, const String &nameB,
+           int sideAPlayer, int sideBPlayer, int setNumber) {
+  String f = String(",\"phase\":\"") + phase + "\"";
+  f += ",\"players\":{\"a\":\"" + esc(nameA) + "\",\"b\":\"" + esc(nameB) + "\"}";
+  f += String(",\"sides\":{\"A\":\"") + (sideAPlayer == 0 ? "a" : "b") +
+       "\",\"B\":\"" + (sideBPlayer == 0 ? "a" : "b") + "\"}";
+  f += ",\"set_number\":" + String(setNumber);
+  emitNow("match", f);
 }
 
 void param(const char *name, const String &from, const String &to, const char *by) {

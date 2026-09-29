@@ -51,6 +51,12 @@ type Point struct {
 	// not cover.
 	Tag  string `json:"tag,omitempty"`
 	Note string `json:"note,omitempty"`
+	// The half is what was measured; the player is that half resolved through
+	// the mapping in force at the time, and the name is what it read as then.
+	// All three are stored so a mapping that turns out wrong is correctable in
+	// the export rather than fatal to the session.
+	Player     string `json:"player,omitempty"`
+	PlayerName string `json:"player_name,omitempty"`
 }
 
 func parseEnvelope(b []byte) (Envelope, error) {

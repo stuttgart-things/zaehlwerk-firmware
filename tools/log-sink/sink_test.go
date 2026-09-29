@@ -274,3 +274,23 @@ func TestCorrectionsAreCountedByTag(t *testing.T) {
 		t.Error("the note did not reach the file")
 	}
 }
+
+// The half is what was measured; the name is what it resolved to at the time.
+// Both are stored, and an undo does not award anybody a point.
+func TestPointsAreCountedByThePlayerTheyResolvedTo(t *testing.T) {
+	s, _ := newTestSink(t)
+	now := time.Now()
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"point","reason":"last_bounce","side":"A","player":"a","player_name":"Pat"}`), now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":2,"type":"point","reason":"last_bounce","side":"B","player":"b","player_name":"Ana"}`), now)
+	// After a change of ends the same half resolves to the other player.
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":3,"type":"point","reason":"last_bounce","side":"A","player":"b","player_name":"Ana"}`), now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":4,"type":"point","reason":"undo","side":" ","player":"","player_name":""}`), now)
+
+	sum := s.Sessions()[0].Summary()
+	if sum.Players["Ana"] != 2 || sum.Players["Pat"] != 1 {
+		t.Errorf("players = %v, want Ana 2 and Pat 1", sum.Players)
+	}
+	if len(sum.Players) != 2 {
+		t.Errorf("players = %v, an undo must not award anybody", sum.Players)
+	}
+}
