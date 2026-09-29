@@ -71,6 +71,14 @@ discards all but the first as duplicates — see
 | ADR | Subject |
 | --- | ------- |
 | [0001](docs/adr/0001-esp-now-to-a-hub.md) | Why ESP-NOW to a hub rather than wifi on every device |
+| [0002](docs/adr/0002-wifi-station-with-access-point-fallback.md) | Wifi station with an access point fallback |
+| [0003](docs/adr/0003-sampling-on-core-1.md) | Sampling on core 1, everything else on core 0 |
+| [0004](docs/adr/0004-diagnostic-log-over-udp-to-a-sink.md) | Diagnostic log over UDP to a sink, beside the API path |
+| [0005](docs/adr/0005-labels-are-append-only-records.md) | Labels are append-only records that point at events |
+| [0006](docs/adr/0006-the-firmware-owns-the-half-to-player-mapping.md) | The firmware owns the table half to player mapping |
+
+0002 to 0006 are proposed, not accepted. What the events look like once they
+are: [docs/event-schema.md](docs/event-schema.md).
 
 ## Piezo bring-up — Stufe 1 and 2
 
