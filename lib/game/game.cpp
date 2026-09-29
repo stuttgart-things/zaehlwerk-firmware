@@ -31,14 +31,13 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
     if (folge[i] == folge[i - 1]) {
       u.hinweis = std::string("Doppelaufsetzer auf ") + folge[i] +
                   " — Ball nicht zurueckgespielt.";
-      // FIXME: Das ist der Stand aus Commit 9892d0d und mit hoher
-      // Wahrscheinlichkeit falsch. `i` ist der Schleifenindex, nicht die
-      // Seite — andere(1) ist 'A', andere(2) ist 'A', und so weiter. Nach
-      // einem Doppelaufsetzer bekommt damit immer A den Punkt. Richtig wäre
-      // andere(folge[i]). Bewusst unverändert übernommen, damit die
-      // Migration das Verhalten nicht anfasst; siehe den Test unten, der
-      // genau das festhält.
-      u.gewinner = andere(static_cast<char>(i));
+      // Zweimal hintereinander auf derselben Hälfte heißt: die Seite hat den
+      // Ball nicht zurückbekommen. Der Ballwechsel war hier zu Ende, der
+      // Punkt gehört der anderen Seite — und zwar unabhängig davon, was
+      // danach noch gemessen wurde. Genau deshalb steht der Zweig hier und
+      // nicht in der Grundannahme oben: wird der Ball nach dem zweiten
+      // Aufsetzer noch zurückgespielt, entscheidet trotzdem diese Stelle.
+      u.gewinner = andere(folge[i]);
       break;
     }
 
