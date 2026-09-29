@@ -26,6 +26,9 @@ bool beendet(int a, int b);
 struct Urteil {
   char gewinner;
   std::string hinweis;  // empty when the sequence was unambiguous; German, shown in the UI
+  // Which rule decided. A protocol token for the log, not prose: the hint says
+  // what to tell a person, this says what to count.
+  const char *grund;    // "last_bounce" | "single_bounce" | "double_bounce" | "none"
 };
 
 // Reads a bounce sequence such as "ABAB": who gets the point, and what makes
