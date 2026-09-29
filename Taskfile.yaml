@@ -184,7 +184,7 @@ tasks:
     desc: Send a made-up session at the sink — no board needed
     dir: tools/log-sink
     cmds:
-      - go run . mock -to {{.TO | default "127.0.0.1:9000"}} -rallies {{.RALLIES | default 8}} -loss {{.LOSS | default 0}} -wrong {{.WRONG | default 0.15}}
+      - go run . mock -to {{.TO | default "127.0.0.1:9000"}} -rallies {{.RALLIES | default 8}} -loss {{.LOSS | default 0}} -wrong {{.WRONG | default 0.15}} -corrections {{.CORRECTIONS | default 0.3}}
 
   sink:test:
     desc: Tests for the sink

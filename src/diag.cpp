@@ -216,7 +216,8 @@ void rallyEnd(uint32_t rallyId, const String &sequence, const char *closedBy) {
 
 void point(uint32_t pointId, uint32_t rallyId, const String &reason,
            const String &hint, char side, int fromA, int fromB, char fromServe,
-           int toA, int toB, char toServe, bool over) {
+           int toA, int toB, char toServe, bool over,
+           const String &tag, const String &note) {
   String f = String(",\"point_id\":\"") + sessionId_ + "-p" + pointId + "\"";
   f += String(",\"rally_id\":\"") + sessionId_ + "-r" + rallyId + "\"";
   f += ",\"reason\":\"" + esc(reason) + "\"";
@@ -226,6 +227,8 @@ void point(uint32_t pointId, uint32_t rallyId, const String &reason,
        ",\"serve\":\"" + String(fromServe) + "\"}";
   f += ",\"to\":{\"a\":" + String(toA) + ",\"b\":" + String(toB) + ",\"serve\":\"" +
        String(toServe) + "\",\"over\":" + (over ? "true" : "false") + "}";
+  if (tag.length()) f += ",\"tag\":\"" + esc(tag) + "\"";
+  if (note.length()) f += ",\"note\":\"" + esc(note) + "\"";
   emitNow("point", f);
 }
 

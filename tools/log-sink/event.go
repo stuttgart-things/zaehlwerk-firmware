@@ -46,6 +46,11 @@ type Point struct {
 	RallyID string `json:"rally_id"`
 	Reason  string `json:"reason"`
 	Side    string `json:"side"`
+	// What a person said at the moment of a correction. The tag is from a fixed
+	// vocabulary so it groups; the note is free text for the one case it does
+	// not cover.
+	Tag  string `json:"tag,omitempty"`
+	Note string `json:"note,omitempty"`
 }
 
 func parseEnvelope(b []byte) (Envelope, error) {

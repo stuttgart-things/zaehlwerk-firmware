@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -237,5 +238,39 @@ func TestMockScoringIgnoresCrossingsThatDecidedNoSide(t *testing.T) {
 	sum := s.Sessions()[0].Summary()
 	if sum.Intended != 1 || sum.IntendedRight != 1 || sum.MockAccuracy != 1 {
 		t.Errorf("scored %d of %d (%.2f), want 1 of 1", sum.IntendedRight, sum.Intended, sum.MockAccuracy)
+	}
+}
+
+// A correction without a reason is a number you cannot learn from. The tag
+// comes from a fixed vocabulary precisely so the summary can group by it; free
+// text alone would not cluster.
+func TestCorrectionsAreCountedByTag(t *testing.T) {
+	s, dir := newTestSink(t)
+	now := time.Now()
+	for _, tag := range []string{"net", "net", "wrong_side"} {
+		s.Handle([]byte(`{"v":1,"session_id":"aa","seq":`+fmt.Sprint(len(tag))+
+			`,"type":"point","reason":"manual","side":"A","tag":"`+tag+
+			`","note":"Ball kam von der Kante"}`), now)
+	}
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":90,"type":"point","reason":"last_bounce","side":"B"}`), now)
+	s.Close()
+
+	sum := s.Sessions()[0].Summary()
+	if sum.Tags["net"] != 2 || sum.Tags["wrong_side"] != 1 {
+		t.Errorf("tags = %v, want net 2 and wrong_side 1", sum.Tags)
+	}
+	// A point nobody corrected carries no tag and must not invent one.
+	if len(sum.Tags) != 2 {
+		t.Errorf("tags = %v, want exactly two kinds", sum.Tags)
+	}
+	// The free text survives into the file next to it.
+	var found bool
+	for _, l := range lines(t, dir) {
+		if strings.Contains(l, "Ball kam von der Kante") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the note did not reach the file")
 	}
 }

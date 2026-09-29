@@ -36,6 +36,9 @@ func (se *Session) count(raw []byte, typ string) {
 		var p Point
 		if json.Unmarshal(raw, &p) == nil {
 			se.Reasons[p.Reason]++
+			if p.Tag != "" {
+				se.Tags[p.Tag]++
+			}
 		}
 	case "rally":
 		se.Rallies++
@@ -60,6 +63,7 @@ type Summary struct {
 	Points    uint64            `json:"points"`
 	Rallies   uint64            `json:"rallies"`
 	Reasons   map[string]uint64 `json:"points_per_reason"`
+	Tags      map[string]uint64 `json:"corrections_per_tag"`
 
 	// Only meaningful for a mock session, where every generated hit says which
 	// side it was meant to be. Nothing has to be labelled by hand for this one.
@@ -85,6 +89,7 @@ func (se *Session) Summary() Summary {
 		Points:    se.Points,
 		Rallies:   se.Rallies,
 		Reasons:   se.Reasons,
+		Tags:      se.Tags,
 		Intended:  se.Intended,
 	}
 	s.IntendedRight = se.IntendedRight
@@ -142,6 +147,14 @@ func (s Summary) Text() string {
 		b.WriteString("  points by reason\n")
 		for _, k := range sortedKeys(s.Reasons) {
 			fmt.Fprintf(&b, "    %-16s %d\n", k, s.Reasons[k])
+		}
+	}
+	if len(s.Tags) > 0 {
+		// What the corrections had in common. This is the reason for asking at
+		// the moment of the correction rather than afterwards.
+		b.WriteString("  corrections by tag\n")
+		for _, k := range sortedKeys(s.Tags) {
+			fmt.Fprintf(&b, "    %-16s %d\n", k, s.Tags[k])
 		}
 	}
 	if s.Intended > 0 {

@@ -199,6 +199,25 @@ transition.
 }
 ```
 
+A correction made by hand carries two more fields, `tag` and `note`:
+
+```json
+{ "type": "point", "reason": "manual", "side": "A",
+  "tag": "edge", "note": "Ball kam von der Kante zurueck" }
+```
+
+`tag` comes from a fixed vocabulary — `missed`, `wrong_side`, `ghost`, `net`,
+`edge`, `bat_or_body`, `let`, `other` — and `note` is free text. The vocabulary
+exists because free text does not cluster: "Netzroller", "netz roller" and
+"Netz" are three different things to a summary, and finding what a game's
+corrections had in common is the whole reason for asking. Both are asked for at
+the moment of the correction, on the board's own page, because that is when the
+answer is known.
+
+Neither is a label. Labels are the sink's, they point at ids, and they can be
+superseded ([ADR-0005](adr/0005-labels-are-append-only-records.md)). These two
+are what the person at the table said while pressing the button.
+
 `reason` is `last_bounce`, `double_bounce`, `single_bounce`, `manual`, `undo`
 or `none`. It comes out of the rules as a token rather than being read back out
 of the German hint, which would be guessing. `side` is the table half; `player` is that half resolved

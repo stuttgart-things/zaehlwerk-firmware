@@ -18,6 +18,18 @@ import (
 // some of them wrong, because a run that is always right proves only that the
 // comparison is not wired up.
 
+// The vocabulary the board's correction card offers. Kept in step with it by
+// hand, which is fine while it is eight words and worth revisiting if it grows.
+var mockTags = []string{"missed", "wrong_side", "ghost", "net", "edge",
+	"bat_or_body", "let", "other"}
+
+var mockNotes = []string{
+	"Ball kam von der Kante zurueck",
+	"beide Haelften gleichzeitig gehoert",
+	"Aufschlag beruehrte das Netz",
+	"Schlaeger auf dem Tisch abgelegt",
+}
+
 const mockChunkBody = 900
 const mockMaxPayload = 1200
 
@@ -136,6 +148,8 @@ func runMock(args []string) error {
 	rallies := fs.Int("rallies", 8, "how many rallies to play")
 	loss := fs.Float64("loss", 0, "fraction of datagrams to drop, 0..1")
 	wrong := fs.Float64("wrong", 0.15, "fraction of hits decided on the wrong side")
+	corrections := fs.Float64("corrections", 0.3,
+		"fraction of points that end as a tagged correction")
 	seed := fs.Int64("seed", 1, "so a run can be repeated")
 	fs.Parse(args)
 
@@ -213,10 +227,29 @@ func runMock(args []string) error {
 		if len(seqStr) > 0 && seqStr[len(seqStr)-1] == 'A' {
 			winner = "B"
 		}
+
+		// Some rallies end in a correction with a reason attached, because that
+		// is what the tag vocabulary is for and an untagged run would not
+		// exercise the grouping.
+		reason, tag, note := "last_bounce", "", ""
+		if rnd.Float64() < *corrections {
+			reason = "manual"
+			tag = mockTags[rnd.Intn(len(mockTags))]
+			if rnd.Float64() < 0.4 {
+				note = mockNotes[rnd.Intn(len(mockNotes))]
+			}
+		}
+		extra := ""
+		if tag != "" {
+			extra = fmt.Sprintf(`,"tag":%q`, tag)
+		}
+		if note != "" {
+			extra += fmt.Sprintf(`,"note":%q`, note)
+		}
 		m.emit(fmt.Sprintf(`"type":"point","point_id":"%s-p%d","rally_id":"%s-r%d",`+
-			`"reason":"last_bounce","hint":"","side":%q,`+
-			`"from":{"a":0,"b":0,"serve":"A"},"to":{"a":1,"b":0,"serve":"B","over":false}`,
-			m.session, points, m.session, r, winner))
+			`"reason":%q,"hint":"","side":%q,`+
+			`"from":{"a":0,"b":0,"serve":"A"},"to":{"a":1,"b":0,"serve":"B","over":false}%s`,
+			m.session, points, m.session, r, reason, winner, extra))
 	}
 
 	fmt.Printf("session %s: %d rallies, %d datagrams sent, %d dropped on purpose\n",

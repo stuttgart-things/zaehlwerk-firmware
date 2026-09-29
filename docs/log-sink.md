@@ -49,6 +49,25 @@ session e32c87dd, started 2026-09-29T14:10:10Z
     of those counted 41
 ```
 
+When corrections were made by hand, the summary adds what they had in common:
+
+```
+  points by reason
+    last_bounce      13
+    manual           12
+  corrections by tag
+    edge              4
+    ghost             1
+    missed            2
+    net               2
+    other             2
+    wrong_side        1
+```
+
+That is the point of asking for a tag on the board rather than a note
+afterwards. Four corrections tagged `edge` in one game is a finding; four notes
+reading "Kante", "von der kante" and "Kantenball" are not.
+
 **`lost` is the number that matters.** UDP has no retry here, so loss that is
 not reported is loss that reads as a quiet session. A gap goes into the file as
 a record of its own, not only into this summary — once the file is all anybody
@@ -85,6 +104,7 @@ Knobs, so a run can be repeated and a failure reproduced:
 task sink:mock LOSS=0.05        # drop a twentieth of the datagrams
 task sink:mock WRONG=0.3        # decide three in ten on the wrong side
 task sink:mock RALLIES=40
+task sink:mock CORRECTIONS=0.5  # half the points end as a tagged correction
 ```
 
 `LOSS` is how the gap detection and the incomplete-event path get exercised: a
