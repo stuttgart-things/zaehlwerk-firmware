@@ -451,6 +451,9 @@ text-align:center}
 color:#9AA7B4;margin-bottom:4px;gap:12px}
 .who span{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ends{margin-top:12px}
+.rec{margin-top:8px;font:11px ui-monospace,monospace;letter-spacing:.05em}
+.rec.on{color:var(--teal)}
+.rec.off{color:#8A94A0}
 .serve{margin-top:10px;font-size:11px;letter-spacing:.16em;color:var(--orange);text-transform:uppercase}
 .won{margin-top:8px;color:var(--teal);font-size:13px}
 .seq{display:flex;gap:5px;justify-content:center;margin-top:14px;min-height:26px;flex-wrap:wrap}
@@ -502,6 +505,7 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   <div class="who"><span id="wa">A</span><span id="wb">B</span></div>
   <div class="score" id="sc">0:0</div>
   <div class="serve" id="sv">Aufschlag A</div>
+  <div class="rec off" id="rc">&#9675; wird nicht aufgezeichnet</div>
   <div class="won" id="wn"></div>
   <div class="seq" id="sq"></div>
 </div>
@@ -673,6 +677,11 @@ function tick(){
     sv.textContent=d.over?'Spiel beendet':'Aufschlag '+(d.serve=='A'?d.na:d.nb);
     wn.textContent=d.over?('Sieger: '+(d.winner=='A'?d.na:d.nb)):'';
     bpa.textContent='Punkt '+d.na; bpb.textContent='Punkt '+d.nb;
+    // Not a warning, just the truth in view. A game played without a sink
+    // listening is gone the moment it is over, and nothing used to say so.
+    rc.className = 'rec ' + (d.rec ? 'on' : 'off');
+    rc.innerHTML = d.rec ? '\u25CF  wird aufgezeichnet'
+                         : '\u25CB  wird nicht aufgezeichnet';
     if(d.mock!==mockAn || d.auto!==autoAn) mockZeigen(d);
     simAn = d.sim; simPause = d.pause; transportZeigen();
     const namen=['','laeuft dauerhaft','spielt ein Spiel','spielt ein Match'];
@@ -865,6 +874,7 @@ void handleState() {
   j += ",\"pause\":" + String(mock::paused() ? "true" : "false");
   j += ",\"sa\":" + String(saetze[spielerAn('A')]);
   j += ",\"sb\":" + String(saetze[spielerAn('B')]);
+  j += ",\"rec\":" + String(diag::enabled() ? "true" : "false");
   j += ",\"img\":\"" + String(ota::imageState()) + "\"";
   j += ",\"up\":" + String(ota::progress());
   j += ",\"log\":[";
