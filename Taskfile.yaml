@@ -192,6 +192,18 @@ tasks:
     cmds:
       - go test ./...
 
+  sink:games:
+    desc: Split a session into one JSON per game — SESSION=…/sessions/<file>.jsonl
+    dir: tools/log-sink
+    silent: true
+    cmds:
+      - |
+        [ -n "{{.SESSION}}" ] || {
+          gum log --level error "Which session? task sink:games SESSION=path/to.jsonl"
+          exit 1
+        }
+        go run . games {{if .SAMPLES}}-samples{{end}} "../../{{.SESSION}}"
+
   sink:export:
     desc: Zip one session with a summary — SESSION=sessions/<file>.jsonl
     dir: tools/log-sink

@@ -27,7 +27,44 @@ moment still carries the firmware version, the git hash and every parameter. A
 file without that event is a file that cannot be compared with another one, and
 the viewer says so rather than drawing a curve with no thresholds beside it.
 
-Sessions land in `sessions/<date>-<time>-<session id>.jsonl`.
+Everything a day produced lives under that day:
+
+```
+sink-data/
+  2026-09-29/
+    sessions/181829-e32cb6ad.jsonl      everything that arrived
+    games/181829-e32cb6ad-game2.json    one file per game
+```
+
+**A game gets its own file the moment it finishes.** The session file is the raw
+record — every curve, hundreds of kilobytes of ADC counts. The game file is what
+happened: every crossing with its peaks, its ratio, what the logic decided and
+why, grouped by rally, with the point and any correction attached. Around forty
+kilobytes for a full game, which is small enough to read in one go or hand to
+somebody.
+
+```json
+{ "game": 2, "final": {"a": 8, "b": 11, "winner": "B", "winner_name": "Ana"},
+  "firmware": {"git": "4526ff9", "sensor": "mock"},
+  "transport": {"records": 148, "lost": 0, "incomplete": 0},
+  "rallies": [ { "rally_id": "…-r2", "sequence": "ABABABA",
+                 "hits": [ {"side":"B","decision":"counted","peak_a":264,
+                            "peak_b":1539,"ratio":5.83,"samples":256} ],
+                 "point": {"reason":"last_bounce","side":"A","player_name":"Pat"} } ],
+  "summary": { "rallies": 19, "crossings": 72,
+               "crossings_by_decision": {"counted": 72} } }
+```
+
+The raw curves are left out by default — they are what makes a session file
+large and they only matter while somebody is working on detection. `-samples`
+keeps them.
+
+Splitting an older session by hand goes through the same code, so a file written
+live and one written afterwards mean the same thing:
+
+```bash
+task sink:games SESSION=sink-data/2026-09-29/sessions/181829-e32cb6ad.jsonl
+```
 
 ## What it reports
 
@@ -82,14 +119,48 @@ today exactly as it always has, so `of those counted` is the two added together.
 When `clear_ratio` starts deciding, the difference between the two lines is what
 shows the change.
 
-## Testing it without a board
+## Playing without a table
+
+The board has a mock sensor: the same detection path fed from a generator
+instead of the ADC, so the scoreboard, the counting logic, the log and the sink
+all run at a desk with no piezo and no ball.
+
+Switch it on under **Mock** in the board's web UI. A large banner says so, and
+switching ends the session and starts a new one — mixing readings from a
+generator and from a table in one file would make every number in it
+unreadable. Sessions carry `sensor: "mock"`.
+
+The triggers are single hits per side, a weak one astride the threshold, a
+phantom hit, a net ball with both halves equally loud, one rally, or continuous
+autoplay. Every generated hit says what it was meant to be, so the sink scores
+the side with nothing labelled:
+
+```
+crossings by decision          points by reason
+  ambiguous         1            double_bounce   1
+  counted          24            last_bounce     5
+mock: side right on 25 of 25 (100.0%)
+```
+
+The `ambiguous` there is the net ball. Both halves equally loud is the case the
+ratio cannot separate, and a detector claiming a side for it is guessing.
+
+**Autoplay is not a stress test yet.** Its bounces are clean and well spaced, so
+the detector gets them all right — useful for exercising the chain, not for
+finding where it breaks. The hard cases are the manual triggers, and making
+autoplay harsh (more crosstalk, tighter timing) is
+[#11](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/11)'s
+remaining half along with CSV replay.
+
+## Testing the sink alone
 
 ```bash
 task sink                       # one terminal
 task sink:mock                  # another
 ```
 
-The generator sends the same wire format the firmware does — chunked events,
+`log-sink mock` is the other half: it sends the same wire format the firmware
+does — chunked events,
 rallies, points, crossings that were counted and crossings that were not. Every
 generated hit carries `intended`, which is what lets the summary score the side
 with nothing labelled by hand:

@@ -21,10 +21,12 @@ namespace diag {
 enum class Decision { Counted, BelowThreshold, Deadtime, Ambiguous };
 const char *decisionName(Decision d);
 
-// One raw sample pair. dtUs is microseconds since the start of the capture, so
-// an irregular sample rate stays readable — which it is until #10 lands.
+// One raw sample pair. dtUs is microseconds relative to the crossing, so an
+// irregular sample rate stays readable — which it is until #10 lands. It is
+// signed because the pre-trigger happened before the crossing, and stamping
+// those with zero made the first milliseconds of every curve a lie.
 struct Sample {
-  uint16_t dtUs;
+  int32_t dtUs;
   int16_t a;
   int16_t b;
 };
@@ -47,6 +49,10 @@ struct Hit {
   // ambiguous one still counts today the way it always has — changing that
   // belongs in the change that fixes detection, not in the one that measures it.
   bool counted;
+  // What a generated hit was meant to be. Empty on a real one. This is what
+  // lets the sink score detection without anybody labelling anything.
+  char intendedSide;      // 'A', 'B' or 0
+  const char *intendedType;  // "bounce" | "weak" | "ghost" | "net" | 0
   uint32_t tUs;
   uint16_t sampleCount;
   uint32_t preUs;
@@ -70,6 +76,11 @@ void begin(const Config &cfg);
 // no parameters at all, and a session with no parameters cannot be compared
 // with another one.
 void restate();
+
+// A new session id and a fresh session event. Switching the sensor source ends
+// the run that was going and starts another: mixing readings from a generator
+// and from a table in one file would make every number in it unreadable.
+void newSession(const char *sensor, const char *reason);
 
 // Drains the queue and sends. Belongs next to the web server, never in the
 // sampler.
@@ -108,5 +119,8 @@ uint16_t sinkPort();
 
 const char *sessionId();
 uint32_t droppedEvents();
+
+// How many events are waiting for a sink to appear.
+int heldEvents();
 
 }  // namespace diag

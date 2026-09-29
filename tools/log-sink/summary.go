@@ -22,13 +22,12 @@ func (se *Session) count(raw []byte, typ string) {
 		if h.Counted {
 			se.Counted++
 		}
-		// Only a crossing that decided a side can be right or wrong about it.
-		// Counting the ones that were never counted dragged a generated run
-		// with 15% wrong sides down to 40% correct.
-		if h.Intended != nil && h.Side != nil && *h.Side != "" {
+		if h.Intended != nil && h.Intended.Type != "" {
 			se.Intended++
-			if *h.Side == h.Intended.Side {
+			se.ByType[h.Intended.Type]++
+			if h.verdict() {
 				se.IntendedRight++
+				se.RightByType[h.Intended.Type]++
 			}
 		}
 	case "point":
@@ -71,31 +70,35 @@ type Summary struct {
 
 	// Only meaningful for a mock session, where every generated hit says which
 	// side it was meant to be. Nothing has to be labelled by hand for this one.
-	Intended      uint64  `json:"mock_hits"`
-	IntendedRight uint64  `json:"mock_side_correct"`
-	MockAccuracy  float64 `json:"mock_side_accuracy"`
+	Intended      uint64            `json:"mock_hits"`
+	IntendedRight uint64            `json:"mock_correct"`
+	MockAccuracy  float64           `json:"mock_accuracy"`
+	ByType        map[string]uint64 `json:"mock_hits_per_type"`
+	RightByType   map[string]uint64 `json:"mock_correct_per_type"`
 }
 
 func (se *Session) Summary() Summary {
 	s := Summary{
-		SessionID: se.ID,
-		Started:   se.Started.UTC().Format("2006-01-02T15:04:05Z"),
-		File:      se.Path,
-		Records:   se.Records,
-		FirstSeq:  se.firstSeq,
-		LastSeq:   se.lastSeq,
-		Lost:      se.Lost,
-		Late:      se.Late,
-		Dropped:   se.Dropped,
-		Events:    se.Counts,
-		Decisions: se.Decision,
-		Counted:   se.Counted,
-		Points:    se.Points,
-		Rallies:   se.Rallies,
-		Reasons:   se.Reasons,
-		Tags:      se.Tags,
-		Players:   se.Players,
-		Intended:  se.Intended,
+		SessionID:   se.ID,
+		Started:     se.Started.UTC().Format("2006-01-02T15:04:05Z"),
+		File:        se.Path,
+		Records:     se.Records,
+		FirstSeq:    se.firstSeq,
+		LastSeq:     se.lastSeq,
+		Lost:        se.Lost,
+		Late:        se.Late,
+		Dropped:     se.Dropped,
+		Events:      se.Counts,
+		Decisions:   se.Decision,
+		Counted:     se.Counted,
+		Points:      se.Points,
+		Rallies:     se.Rallies,
+		Reasons:     se.Reasons,
+		Tags:        se.Tags,
+		Players:     se.Players,
+		Intended:    se.Intended,
+		ByType:      se.ByType,
+		RightByType: se.RightByType,
 	}
 	s.IntendedRight = se.IntendedRight
 	if se.Intended > 0 {
@@ -169,8 +172,13 @@ func (s Summary) Text() string {
 		}
 	}
 	if s.Intended > 0 {
-		fmt.Fprintf(&b, "  mock: side right on %d of %d (%.1f%%)\n",
+		fmt.Fprintf(&b, "  mock: right on %d of %d (%.1f%%)\n",
 			s.IntendedRight, s.Intended, 100*s.MockAccuracy)
+		// The total hides which kind it got wrong, and that is the only part
+		// worth acting on.
+		for _, k := range sortedKeys(s.ByType) {
+			fmt.Fprintf(&b, "    %-12s %d of %d\n", k, s.RightByType[k], s.ByType[k])
+		}
 	}
 	return b.String()
 }

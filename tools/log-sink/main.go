@@ -8,6 +8,7 @@
 //	log-sink                       listen on :9000, viewer on :9001
 //	log-sink -dir ./data           somewhere else to write
 //	log-sink export <file.jsonl>   a zip with the file and a summary
+//	log-sink games <file.jsonl>    one readable JSON per game, curves left out
 //	log-sink mock                  send a made-up session at it, no board needed
 package main
 
@@ -29,6 +30,11 @@ func main() {
 		switch os.Args[1] {
 		case "export":
 			if err := runExport(os.Args[2:]); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "games":
+			if err := runGames(os.Args[2:]); err != nil {
 				log.Fatal(err)
 			}
 			return
@@ -70,7 +76,10 @@ func main() {
 		}
 	}
 
-	log.Printf("listening on %s, writing to %s/sessions", *addr, *dir)
+	// Named as they actually are: everything a day produced under that day, with
+	// the finished games beside the raw sessions.
+	log.Printf("listening on %s", *addr)
+	log.Printf("writing to %s/<day>/sessions and %s/<day>/games", *dir, *dir)
 	if *web != "" {
 		go serveViewer(*web, *dir, sink)
 		log.Printf("viewer on http://localhost%s", *web)
