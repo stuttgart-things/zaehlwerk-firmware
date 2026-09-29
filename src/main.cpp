@@ -35,7 +35,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <driver/adc.h>
 
 #include <string>
 
@@ -107,31 +106,19 @@ uint32_t vorlaufFuell = 0;
 // into the queue, so reusing the same buffer is safe.
 diag::Hit rohling;
 
-// GPIO34 and GPIO35 are ADC1 channels 6 and 7. ADC1 is not a preference: ADC2
-// is unavailable while wifi is running.
+// Both pins are on ADC1. That is a requirement, not a preference: ADC2 is
+// unavailable while wifi is running.
 //
-// The mapping is fixed by the chip, so moving a piezo to another pin has to
-// move the channel with it. The assertion turns that into a build error rather
-// than a board that reads the wrong pin and says nothing.
-static_assert(ZW_PIN_A == 34 && ZW_PIN_B == 35,
-              "the ADC1 channels below are chosen for GPIO34 and GPIO35");
-const adc1_channel_t KANAL_A = ADC1_CHANNEL_6;
-const adc1_channel_t KANAL_B = ADC1_CHANNEL_7;
+// The reads go through analogRead rather than adc1_get_raw. The raw call is
+// leaner and was tried here: with the pins attached by the core exactly as
+// analogRead attaches them, it returned zero on both channels for a whole
+// session while the task ticked 158499 times. Something in that path is not
+// the same read, and a fast wrong number is worse than a slow right one.
+// Revisit with a scope, not with a guess.
 
 void sensorTask(void *) {
-  // Let the core attach the pins exactly as analogRead() would — width,
-  // attenuation, the touch peripheral off, and pinMode(pin, ANALOG), which is
-  // what routes the pad to the ADC at all. Reproducing that by hand read zeroes
-  // for a whole session: adc1_config_* alone is not enough, and the missing
-  // step was the one nobody writes down.
-  //
-  // After this, adc1_get_raw is the same read without the per-call
-  // reconfiguration analogRead does, which is where 84 microseconds per channel
-  // went against a bounce that rises in tens.
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
-  analogRead(ZW_PIN_A);
-  analogRead(ZW_PIN_B);
 
   // No watchdog call here, though a task that never yields looks like it needs
   // one. The Arduino core ships CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
@@ -146,8 +133,8 @@ void sensorTask(void *) {
     sensorTicks++;
 
     const uint32_t jetztUs = micros();
-    int a = adc1_get_raw(KANAL_A);
-    int b = adc1_get_raw(KANAL_B);
+    int a = analogRead(ZW_PIN_A);
+    int b = analogRead(ZW_PIN_B);
     static uint32_t vorigUs = 0;
     abstandUs = jetztUs - vorigUs;
     vorigUs = jetztUs;
@@ -213,8 +200,8 @@ void sensorTask(void *) {
       int32_t kreuzB = b >= schwelleB ? 0 : -1;
       while (millis() - start < (uint32_t)FENSTER_MS) {
         uint32_t tUs = micros();
-        int va = adc1_get_raw(KANAL_A); if (va > spA) spA = va;
-        int vb = adc1_get_raw(KANAL_B); if (vb > spB) spB = vb;
+        int va = analogRead(ZW_PIN_A); if (va > spA) spA = va;
+        int vb = analogRead(ZW_PIN_B); if (vb > spB) spB = vb;
         if (kreuzA < 0 && va >= schwelleA) kreuzA = (int32_t)(tUs - jetztUs);
         if (kreuzB < 0 && vb >= schwelleB) kreuzB = (int32_t)(tUs - jetztUs);
         if (n < diag::CAPTURE_SAMPLES) {
