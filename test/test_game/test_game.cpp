@@ -1,9 +1,4 @@
-// Tests der Spielregeln, so wie sie heute rechnen.
-//
-// Die Migration auf PlatformIO sollte das Verhalten nicht anfassen, also hält
-// diese Datei den Ist-Stand fest — einschließlich der Stelle, an der er
-// erkennbar falsch ist. Der Test dort ist bewusst so geschrieben, dass er
-// rot wird, sobald jemand die Stelle repariert; dann gehört er mitgeändert.
+// Tests der Spielregeln.
 
 #include <unity.h>
 
@@ -87,18 +82,29 @@ static void ein_doppelaufsetzer_wird_als_solcher_erkannt() {
   TEST_ASSERT_TRUE(u.hinweis.find("Doppelaufsetzer") != std::string::npos);
 }
 
-// ACHTUNG — festgehaltener Fehler, kein gewünschtes Verhalten.
-//
-// Nach einem Doppelaufsetzer rechnet der Code mit dem Schleifenindex statt mit
-// der Seite: andere(3) ist 'A', weil 3 nicht 'A' ist. Damit bekommt nach
-// jedem Doppelaufsetzer immer A den Punkt, egal auf welcher Hälfte er lag.
-// Hier müsste 'B' stehen. Beim Reparieren diesen Test mitdrehen.
-static void FIXME_doppelaufsetzer_vergibt_den_punkt_immer_an_a() {
-  game::Urteil u = game::rallyBewerten("ABAA", 'A');
-  TEST_ASSERT_EQUAL_CHAR('A', u.gewinner);   // richtig waere 'B'
+static void der_punkt_geht_an_die_seite_ohne_den_doppelaufsetzer() {
+  // Doppelaufsetzer auf A am Ende — A hat nicht zurueckbekommen.
+  TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("ABAA", 'A').gewinner);
+  // Dasselbe auf B.
+  TEST_ASSERT_EQUAL_CHAR('A', game::rallyBewerten("BABB", 'B').gewinner);
+}
 
-  game::Urteil v = game::rallyBewerten("BABB", 'B');
-  TEST_ASSERT_EQUAL_CHAR('A', v.gewinner);   // richtig waere ebenfalls 'A'
+// Der Fall, fuer den der Zweig ueberhaupt existiert: nach dem zweiten
+// Aufsetzer wurde noch gespielt. Der Ballwechsel war trotzdem vorher zu Ende,
+// also darf der letzte Aufsetzer nicht mehr entscheiden.
+static void ein_doppelaufsetzer_entscheidet_auch_wenn_danach_weitergespielt_wird() {
+  // "ABBA": Doppelaufsetzer auf B, Punkt fuer A. Nach dem letzten Aufsetzer
+  // allein waere es 'B' — hier gewinnt die Stelle des Doppelaufsetzers.
+  TEST_ASSERT_EQUAL_CHAR('A', game::rallyBewerten("ABBA", 'A').gewinner);
+  // "BAAB": Doppelaufsetzer auf A, Punkt fuer B; nach dem letzten Aufsetzer
+  // waere es 'A'.
+  TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("BAAB", 'B').gewinner);
+}
+
+// Der erste Doppelaufsetzer entscheidet, nicht der letzte — danach ist der
+// Ballwechsel vorbei und alles Weitere ist Messrauschen.
+static void der_erste_doppelaufsetzer_entscheidet() {
+  TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("AABB", 'A').gewinner);
 }
 
 int main(int, char **) {
@@ -114,6 +120,8 @@ int main(int, char **) {
   RUN_TEST(ein_erster_aufsetzer_auf_der_falschen_seite_wird_vermerkt);
   RUN_TEST(eine_leere_folge_vergibt_keinen_punkt);
   RUN_TEST(ein_doppelaufsetzer_wird_als_solcher_erkannt);
-  RUN_TEST(FIXME_doppelaufsetzer_vergibt_den_punkt_immer_an_a);
+  RUN_TEST(der_punkt_geht_an_die_seite_ohne_den_doppelaufsetzer);
+  RUN_TEST(ein_doppelaufsetzer_entscheidet_auch_wenn_danach_weitergespielt_wird);
+  RUN_TEST(der_erste_doppelaufsetzer_entscheidet);
   return UNITY_END();
 }
