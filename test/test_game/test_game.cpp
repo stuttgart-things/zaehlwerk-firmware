@@ -1,4 +1,9 @@
-// Tests der Spielregeln.
+// Tests of the game rules.
+//
+// The rules themselves keep their German identifiers, because they are a port
+// and should still line up with sketches/stufe2-zaehlwerk-mvp line for line.
+// The test names are prose that ends up in the test output, so they are English
+// like everything else a developer reads here.
 
 #include <unity.h>
 
@@ -9,9 +14,9 @@
 void setUp() {}
 void tearDown() {}
 
-/* ---------- Aufschlagwechsel ---------- */
+/* ---------- serve rotation ---------- */
 
-static void aufschlag_wechselt_nach_je_zwei_punkten() {
+static void the_serve_changes_after_every_second_point() {
   TEST_ASSERT_EQUAL_CHAR('A', game::aufschlagFuer(0, 0, 'A'));
   TEST_ASSERT_EQUAL_CHAR('A', game::aufschlagFuer(1, 0, 'A'));
   TEST_ASSERT_EQUAL_CHAR('B', game::aufschlagFuer(1, 1, 'A'));
@@ -19,109 +24,107 @@ static void aufschlag_wechselt_nach_je_zwei_punkten() {
   TEST_ASSERT_EQUAL_CHAR('A', game::aufschlagFuer(2, 2, 'A'));
 }
 
-static void ab_zehn_zu_zehn_wechselt_der_aufschlag_nach_jedem_punkt() {
+static void from_ten_all_the_serve_changes_after_every_point() {
   TEST_ASSERT_EQUAL_CHAR('A', game::aufschlagFuer(10, 10, 'A'));
   TEST_ASSERT_EQUAL_CHAR('B', game::aufschlagFuer(11, 10, 'A'));
   TEST_ASSERT_EQUAL_CHAR('A', game::aufschlagFuer(11, 11, 'A'));
 }
 
-static void der_erste_aufschlag_dreht_die_ganze_reihe() {
+static void who_serves_first_flips_the_whole_sequence() {
   TEST_ASSERT_EQUAL_CHAR('B', game::aufschlagFuer(0, 0, 'B'));
   TEST_ASSERT_EQUAL_CHAR('A', game::aufschlagFuer(1, 1, 'B'));
 }
 
-/* ---------- Satzende ---------- */
+/* ---------- end of a set ---------- */
 
-static void elf_punkte_mit_zwei_vorsprung_beenden_den_satz() {
+static void eleven_points_with_two_clear_ends_the_set() {
   TEST_ASSERT_TRUE(game::beendet(11, 9));
   TEST_ASSERT_TRUE(game::beendet(9, 11));
   TEST_ASSERT_FALSE(game::beendet(10, 9));
 }
 
-static void bei_einem_punkt_vorsprung_geht_es_weiter() {
+static void a_single_point_lead_carries_on() {
   TEST_ASSERT_FALSE(game::beendet(11, 10));
   TEST_ASSERT_TRUE(game::beendet(12, 10));
   TEST_ASSERT_FALSE(game::beendet(15, 14));
 }
 
-/* ---------- Auswertung eines Ballwechsels ---------- */
+/* ---------- reading a rally ---------- */
 
-static void der_punkt_geht_an_die_seite_des_vorletzten_aufsetzers() {
+static void the_point_goes_to_the_side_of_the_second_to_last_bounce() {
   game::Urteil u = game::rallyBewerten("ABAB", 'A');
   TEST_ASSERT_EQUAL_CHAR('A', u.gewinner);
   TEST_ASSERT_TRUE(u.hinweis.empty());
 }
 
-static void ein_einzelner_aufsetzer_ist_ein_verpatzter_aufschlag() {
+static void a_single_bounce_is_a_botched_serve() {
   game::Urteil u = game::rallyBewerten("A", 'A');
   TEST_ASSERT_EQUAL_CHAR('B', u.gewinner);
   TEST_ASSERT_TRUE(u.hinweis.find("Nur ein Aufsetzer") != std::string::npos);
 }
 
-static void zwei_aufsetzer_ab_aufschlag_sind_nicht_eindeutig() {
+static void two_bounces_from_the_serve_are_ambiguous() {
   game::Urteil u = game::rallyBewerten("AB", 'A');
   TEST_ASSERT_EQUAL_CHAR('A', u.gewinner);
   TEST_ASSERT_TRUE(u.hinweis.find("Ass oder Netzaufschlag") != std::string::npos);
 }
 
-static void ein_erster_aufsetzer_auf_der_falschen_seite_wird_vermerkt() {
+static void a_first_bounce_on_the_wrong_side_is_recorded() {
   game::Urteil u = game::rallyBewerten("BABA", 'A');
   TEST_ASSERT_EQUAL_CHAR('B', u.gewinner);
   TEST_ASSERT_TRUE(u.hinweis.find("nicht auf der Aufschlagseite") != std::string::npos);
 }
 
-static void eine_leere_folge_vergibt_keinen_punkt() {
+static void an_empty_sequence_awards_nothing() {
   game::Urteil u = game::rallyBewerten("", 'A');
   TEST_ASSERT_EQUAL_CHAR(' ', u.gewinner);
 }
 
-// Zwei Aufsetzer hintereinander auf derselben Hälfte heißt: der Ball kam nicht
-// zurück, der Punkt gehört der anderen Seite.
-static void ein_doppelaufsetzer_wird_als_solcher_erkannt() {
+// Two bounces in a row on the same half mean the ball did not come back, so the
+// point belongs to the other side.
+static void a_double_bounce_is_recognised_as_one() {
   game::Urteil u = game::rallyBewerten("ABAA", 'A');
   TEST_ASSERT_TRUE(u.hinweis.find("Doppelaufsetzer") != std::string::npos);
 }
 
-static void der_punkt_geht_an_die_seite_ohne_den_doppelaufsetzer() {
-  // Doppelaufsetzer auf A am Ende — A hat nicht zurueckbekommen.
+static void the_point_goes_to_the_side_that_did_not_double_bounce() {
+  // A double bounce on A at the end — A did not get it back.
   TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("ABAA", 'A').gewinner);
-  // Dasselbe auf B.
+  // The same on B.
   TEST_ASSERT_EQUAL_CHAR('A', game::rallyBewerten("BABB", 'B').gewinner);
 }
 
-// Der Fall, fuer den der Zweig ueberhaupt existiert: nach dem zweiten
-// Aufsetzer wurde noch gespielt. Der Ballwechsel war trotzdem vorher zu Ende,
-// also darf der letzte Aufsetzer nicht mehr entscheiden.
-static void ein_doppelaufsetzer_entscheidet_auch_wenn_danach_weitergespielt_wird() {
-  // "ABBA": Doppelaufsetzer auf B, Punkt fuer A. Nach dem letzten Aufsetzer
-  // allein waere es 'B' — hier gewinnt die Stelle des Doppelaufsetzers.
+// The case the branch exists for: play continued after the second bounce. The
+// rally was over before that, so the last bounce must not decide any more.
+static void a_double_bounce_decides_even_when_play_continued() {
+  // "ABBA": double bounce on B, point to A. By the last bounce alone it would
+  // be 'B' — here the double bounce wins.
   TEST_ASSERT_EQUAL_CHAR('A', game::rallyBewerten("ABBA", 'A').gewinner);
-  // "BAAB": Doppelaufsetzer auf A, Punkt fuer B; nach dem letzten Aufsetzer
-  // waere es 'A'.
+  // "BAAB": double bounce on A, point to B; by the last bounce it would be 'A'.
   TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("BAAB", 'B').gewinner);
 }
 
-// Der erste Doppelaufsetzer entscheidet, nicht der letzte — danach ist der
-// Ballwechsel vorbei und alles Weitere ist Messrauschen.
-static void der_erste_doppelaufsetzer_entscheidet() {
+// The first double bounce decides, not the last — after it the rally is over and
+// everything further is measurement noise.
+static void the_first_double_bounce_decides() {
   TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("AABB", 'A').gewinner);
 }
 
 int main(int, char **) {
   UNITY_BEGIN();
-  RUN_TEST(aufschlag_wechselt_nach_je_zwei_punkten);
-  RUN_TEST(ab_zehn_zu_zehn_wechselt_der_aufschlag_nach_jedem_punkt);
-  RUN_TEST(der_erste_aufschlag_dreht_die_ganze_reihe);
-  RUN_TEST(elf_punkte_mit_zwei_vorsprung_beenden_den_satz);
-  RUN_TEST(bei_einem_punkt_vorsprung_geht_es_weiter);
-  RUN_TEST(der_punkt_geht_an_die_seite_des_vorletzten_aufsetzers);
-  RUN_TEST(ein_einzelner_aufsetzer_ist_ein_verpatzter_aufschlag);
-  RUN_TEST(zwei_aufsetzer_ab_aufschlag_sind_nicht_eindeutig);
-  RUN_TEST(ein_erster_aufsetzer_auf_der_falschen_seite_wird_vermerkt);
-  RUN_TEST(eine_leere_folge_vergibt_keinen_punkt);
-  RUN_TEST(ein_doppelaufsetzer_wird_als_solcher_erkannt);
-  RUN_TEST(der_punkt_geht_an_die_seite_ohne_den_doppelaufsetzer);
-  RUN_TEST(ein_doppelaufsetzer_entscheidet_auch_wenn_danach_weitergespielt_wird);
-  RUN_TEST(der_erste_doppelaufsetzer_entscheidet);
+  RUN_TEST(the_serve_changes_after_every_second_point);
+  RUN_TEST(from_ten_all_the_serve_changes_after_every_point);
+  RUN_TEST(who_serves_first_flips_the_whole_sequence);
+  RUN_TEST(eleven_points_with_two_clear_ends_the_set);
+  RUN_TEST(a_single_point_lead_carries_on);
+  RUN_TEST(the_point_goes_to_the_side_of_the_second_to_last_bounce);
+  RUN_TEST(a_single_bounce_is_a_botched_serve);
+  RUN_TEST(two_bounces_from_the_serve_are_ambiguous);
+  RUN_TEST(a_first_bounce_on_the_wrong_side_is_recorded);
+  RUN_TEST(an_empty_sequence_awards_nothing);
+  RUN_TEST(a_double_bounce_is_recognised_as_one);
+  RUN_TEST(the_point_goes_to_the_side_that_did_not_double_bounce);
+  RUN_TEST(a_double_bounce_decides_even_when_play_continued);
+  RUN_TEST(the_first_double_bounce_decides);
   return UNITY_END();
 }

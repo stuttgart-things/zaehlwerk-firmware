@@ -2,31 +2,34 @@
 
 #include <string>
 
-// Die Regeln des Zählwerks, ohne Arduino darunter.
+// The rules of the Zählwerk, with no Arduino underneath.
 //
-// Alles hier ist reine Rechnung auf Zahlen und einer Aufsetzerfolge, damit es
-// mit `pio test -e native` auf dem Laptop geprüft werden kann. Wer hier etwas
-// ändert, ändert den Spielstand — nicht die Anzeige.
+// Everything here is arithmetic on numbers and a bounce sequence, so it can be
+// checked with `pio test -e native` on a laptop. Changing something here
+// changes the score — not the display.
+//
+// The identifiers stay German, and so do the hint strings: those are shown in
+// the web UI, which a player reads.
 namespace game {
 
-// Die jeweils andere Tischhälfte.
+// The other table half.
 char andere(char seite);
 
-// Wer bei diesem Spielstand aufschlägt. Ab 10:10 wechselt der Aufschlag nach
-// jedem Punkt, davor nach jedem zweiten.
+// Who serves at this score. From 10:10 the serve changes after every point,
+// before that after every second one.
 char aufschlagFuer(int a, int b, char erster);
 
-// Ein Satz ist durch: elf Punkte und zwei Vorsprung.
+// A set is over at eleven points with two clear.
 bool beendet(int a, int b);
 
-// Das Urteil über einen abgeschlossenen Ballwechsel.
+// The verdict on a finished rally.
 struct Urteil {
   char gewinner;
-  std::string hinweis;  // leer, wenn die Folge eindeutig war
+  std::string hinweis;  // empty when the sequence was unambiguous; German, shown in the UI
 };
 
-// Wertet eine Aufsetzerfolge wie "ABAB" aus: Wer bekommt den Punkt, und
-// woran ist die Entscheidung unsicher?
+// Reads a bounce sequence such as "ABAB": who gets the point, and what makes
+// the decision uncertain?
 Urteil rallyBewerten(const std::string &folge, char aufschlag);
 
 }  // namespace game

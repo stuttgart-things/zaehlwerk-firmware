@@ -59,8 +59,8 @@ The USB flash happens once. After that the board can be updated over wifi, and
 the USB cable is only needed for power and for the serial monitor.
 
 1. Flash `piezo` over USB once, with an OTA password set in `secrets.ini`. The
-   serial line has to say `[ota] bereit`. If it says `[ota] aus: kein
-   Passwort`, there is no `secrets.ini` and nothing below will work.
+   serial line has to say `[ota] ready`. If it says `[ota] off: no password`,
+   there is no `secrets.ini` and nothing below will work.
 2. Join the board's wifi — `Zaehlwerk`, password from `secrets.ini`.
 3. *Upload* under **`piezo-ota`**, or:
 
@@ -109,10 +109,10 @@ name: whichever slot is running now, the crash build goes into the other one and
 the rollback brings the current one back. Running from `app1`, it reads:
 
 ```
-[ota] laeuft aus app0, Image auf Probe
-[ota] OTA_TEST_CRASH: Absturz mit Absicht, der Bootloader rollt zurueck
+[ota] running from app0, image on probation
+[ota] OTA_TEST_CRASH: crashing on purpose, the bootloader will roll back
 ...
-[ota] laeuft aus app1, Image bestaetigt
+[ota] running from app1, image confirmed
 ```
 
 What matters is the pair: a slot **on probation** that is replaced by a slot

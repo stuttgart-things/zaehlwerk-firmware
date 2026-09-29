@@ -1,8 +1,8 @@
 """Bake the version and the git hash into the firmware at build time.
 
 Typing a version into a header means it is wrong the first time somebody
-forgets to bump it, and a log that names the wrong commit is worse than one
-that names none. So it comes from git, on every build.
+forgets to bump it, and a log naming the wrong commit is worse than one naming
+none. So it comes out of git, on every build.
 
 A working tree with uncommitted changes to tracked files produces a hash with
 `-dirty` on it. Untracked files do not count — they are not in the build.

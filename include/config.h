@@ -1,36 +1,36 @@
 #pragma once
 
-// Feste Vorgaben der Zählwerk-Firmware.
+// The fixed settings of the Zählwerk firmware.
 //
-// Alles hier lässt sich über einen Build-Flag überschreiben, ohne die Quelle
-// anzufassen — Zugangsdaten kommen aus secrets.ini (Vorlage:
-// secrets.ini.example) und stehen deshalb nicht im Repo.
+// Everything here can be overridden with a build flag without touching the
+// source. Credentials come from secrets.ini (template: secrets.ini.example) and
+// are therefore not in the repository.
 
-// --- Hardware -------------------------------------------------------------
-// Beide Pins liegen an ADC1. Das ist Pflicht, nicht Geschmack: ADC2 ist
-// blockiert, sobald das WLAN läuft.
+// --- hardware -------------------------------------------------------------
+// Both pins are on ADC1. That is a requirement, not a preference: ADC2 is
+// unavailable as soon as wifi is running.
 #ifndef ZW_PIN_A
-#define ZW_PIN_A 34  // Piezo unter Hälfte A
+#define ZW_PIN_A 34  // piezo under half A
 #endif
 #ifndef ZW_PIN_B
-#define ZW_PIN_B 35  // Piezo unter Hälfte B
+#define ZW_PIN_B 35  // piezo under half B
 #endif
 
-// --- Netz ---
-// Name für mDNS und für espota. Vollständig also zaehlwerk.local, sobald die
-// Namensauflösung steht (#14).
+// --- network --------------------------------------------------------------
+// The name for mDNS and for espota — zaehlwerk.local once name resolution is
+// in place (#14).
 #ifndef ZW_HOSTNAME
 #define ZW_HOSTNAME "zaehlwerk"
 #endif
 
-// Leer heißt: OTA bleibt aus. Absichtlich kein Vorgabewert — ein offener
-// Update-Pfad in einem fremden WLAN ist schlimmer als gar keiner. Der Wert
-// kommt aus secrets.ini.
+// Empty means OTA stays off. Deliberately without a default: an open update
+// path on somebody else's wifi is worse than none. The value comes from
+// secrets.ini.
 #ifndef ZW_OTA_PASS
 #define ZW_OTA_PASS ""
 #endif
 
-// --- Eigener Accesspoint --------------------------------------------------
+// --- the board's own access point -----------------------------------------
 #ifndef ZW_AP_SSID
 #define ZW_AP_SSID "Zaehlwerk"
 #endif
