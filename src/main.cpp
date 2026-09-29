@@ -82,6 +82,12 @@ volatile uint32_t sensorTicks = 0;
 // means little without it — the channels sit at different levels and drift.
 volatile int baselineA = 0, baselineB = 0;
 
+// The last pair the sampler read. Only for looking at: without it the only way
+// to see what the ADC returns is to wait for a crossing, which is no help when
+// the complaint is that there are none.
+volatile int letzteA = 0, letzteB = 0;
+volatile uint32_t abstandUs = 0;   // gap between the last two reads
+
 // Ids. Every hit belongs to a rally, every point to the rally it ended, so a
 // correction later can point at one thing rather than at a span of time.
 uint32_t rallyId = 0, pointId = 0;
@@ -142,6 +148,10 @@ void sensorTask(void *) {
     const uint32_t jetztUs = micros();
     int a = adc1_get_raw(KANAL_A);
     int b = adc1_get_raw(KANAL_B);
+    static uint32_t vorigUs = 0;
+    abstandUs = jetztUs - vorigUs;
+    vorigUs = jetztUs;
+    letzteA = a; letzteB = b;
 
     vorlauf[vorlaufKopf] = { (uint16_t)(jetztUs & 0xffff), (int16_t)a, (int16_t)b };
     vorlaufKopf = (vorlaufKopf + 1) % diag::PRE_SAMPLES;
@@ -703,7 +713,11 @@ void setup() {
     String j = String("{\"host\":\"") + diag::sinkHost() + "\",\"port\":" +
                diag::sinkPort() + ",\"on\":" + (diag::enabled() ? "true" : "false") +
                ",\"session\":\"" + diag::sessionId() + "\",\"dropped\":" +
-               diag::droppedEvents() + "}";
+               diag::droppedEvents() +
+               ",\"a\":" + String(letzteA) + ",\"b\":" + String(letzteB) +
+               ",\"base_a\":" + String(baselineA) + ",\"base_b\":" + String(baselineB) +
+               ",\"gap_us\":" + String(abstandUs) +
+               ",\"ticks\":" + String(sensorTicks) + "}";
     server.send(200, "application/json", j);
   });
   server.begin();
