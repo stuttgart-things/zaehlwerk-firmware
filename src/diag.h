@@ -58,9 +58,18 @@ struct Config {
   const char *sensor;    // "adc" | "mock"
   String paramsJson;     // the whole parameter set, as the session event carries it
   const char *reason;    // "boot" | "mode_switch" | "ota" | "manual"
+  // Read again whenever the session is restated, so a file opened after a knob
+  // was turned carries the values as they stand rather than as they booted.
+  String (*parameters)();
 };
 
 void begin(const Config &cfg);
+
+// Emits a fresh session event. Called when the sink is pointed somewhere new or
+// logging is switched on: a file that starts mid-stream would otherwise carry
+// no parameters at all, and a session with no parameters cannot be compared
+// with another one.
+void restate();
 
 // Drains the queue and sends. Belongs next to the web server, never in the
 // sampler.

@@ -675,7 +675,7 @@ void setup() {
 
   // Last, so the session event carries a network that is already up and the
   // parameters as they actually stand.
-  diag::begin({ ZW_DEVICE_ID, "adc", parameterJson(), "boot" });
+  diag::begin({ ZW_DEVICE_ID, "adc", parameterJson(), "boot", parameterJson });
 }
 
 // The verdict on our own start that the rollback listens to. Deliberately more

@@ -135,8 +135,26 @@ const char *decisionName(Decision d) {
   }
 }
 
+// Kept so the session event can be stated again later, when somebody points the
+// sink at a different machine mid-session.
+Config cfg_{};
+String (*parameters_)() = nullptr;
+
+void sayHello() {
+  String f = String(",\"device_id\":\"") + esc(deviceId_) + "\"";
+  f += String(",\"fw_version\":\"") + ZW_FW_VERSION + "\"";
+  f += String(",\"git_hash\":\"") + ZW_GIT_HASH + "\"";
+  f += String(",\"sensor\":\"") + cfg_.sensor + "\"";
+  f += String(",\"reason\":\"") + cfg_.reason + "\"";
+  f += ",\"params\":" + (parameters_ ? parameters_() : cfg_.paramsJson);
+  uint32_t s = seq_++;
+  emit(s, head("session", s, (uint32_t)micros()) + f + "}");
+}
+
 void begin(const Config &cfg) {
   deviceId_ = cfg.deviceId;
+  cfg_ = cfg;
+  parameters_ = cfg.parameters;
 
   Preferences prefs;
   prefs.begin(NVS_NAMESPACE, false);
@@ -159,17 +177,12 @@ void begin(const Config &cfg) {
                 host_.length() ? host_.c_str() : "(none)", port_,
                 sendable() ? "on" : "off");
 
-  // Always seq 0, and the only place the build and the parameters are stated in
-  // full. Everything downstream reads the rest against this.
-  String f = String(",\"device_id\":\"") + esc(deviceId_) + "\"";
-  f += String(",\"fw_version\":\"") + ZW_FW_VERSION + "\"";
-  f += String(",\"git_hash\":\"") + ZW_GIT_HASH + "\"";
-  f += String(",\"sensor\":\"") + cfg.sensor + "\"";
-  f += String(",\"reason\":\"") + cfg.reason + "\"";
-  f += ",\"params\":" + cfg.paramsJson;
-  uint32_t s = seq_++;  // 0
-  emit(s, head("session", s, (uint32_t)micros()) + f + "}");
+  // The only place the build and the parameters are stated in full. Everything
+  // downstream is read against it.
+  sayHello();
 }
+
+void restate() { sayHello(); }
 
 void tick() {
   if (!queue_) return;
@@ -228,6 +241,7 @@ void note(const char *level, const String &text) {
 void setSink(const String &host, uint16_t port) {
   host_ = host;
   port_ = port;
+  if (sendable()) restate();
   Preferences prefs;
   prefs.begin(NVS_NAMESPACE, false);
   prefs.putString(KEY_HOST, host);
@@ -236,7 +250,9 @@ void setSink(const String &host, uint16_t port) {
 }
 
 void setEnabled(bool on) {
+  const bool war = sendable();
   on_ = on;
+  if (sendable() && !war) restate();
   Preferences prefs;
   prefs.begin(NVS_NAMESPACE, false);
   prefs.putBool(KEY_ON, on);
