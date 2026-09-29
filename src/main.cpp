@@ -120,10 +120,12 @@ void sensorTask(void *) {
   adc1_config_channel_atten(KANAL_A, ADC_ATTEN_DB_11);
   adc1_config_channel_atten(KANAL_B, ADC_ATTEN_DB_11);
 
-  // This core is the sampler's. Nothing else runs here, so starving the idle
-  // task is deliberate rather than an oversight — and the watchdog has to be
-  // told, or it reports the design as a fault.
-  disableCore1WDT();
+  // No watchdog call here, though a task that never yields looks like it needs
+  // one. The Arduino core ships CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
+  // unset, so core 1's idle task is not watched and there is nothing to
+  // disable: calling disableCore1WDT() only logs "Failed to remove Core 1 IDLE
+  // task from WDT" on every boot. If that config ever changes, this is where
+  // the call goes back.
 
   uint32_t sperreBis = 0;
 
