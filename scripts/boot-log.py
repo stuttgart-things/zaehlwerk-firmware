@@ -85,3 +85,7 @@ def main():
     if starts > 3:
         print("\nACHTUNG: %d Neustarts in %g s — das ist eine Bootschleife."
               % (starts, seconds))
+
+
+if __name__ == "__main__":
+    main()
