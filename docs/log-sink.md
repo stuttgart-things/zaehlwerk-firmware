@@ -82,14 +82,48 @@ today exactly as it always has, so `of those counted` is the two added together.
 When `clear_ratio` starts deciding, the difference between the two lines is what
 shows the change.
 
-## Testing it without a board
+## Playing without a table
+
+The board has a mock sensor: the same detection path fed from a generator
+instead of the ADC, so the scoreboard, the counting logic, the log and the sink
+all run at a desk with no piezo and no ball.
+
+Switch it on under **Mock** in the board's web UI. A large banner says so, and
+switching ends the session and starts a new one — mixing readings from a
+generator and from a table in one file would make every number in it
+unreadable. Sessions carry `sensor: "mock"`.
+
+The triggers are single hits per side, a weak one astride the threshold, a
+phantom hit, a net ball with both halves equally loud, one rally, or continuous
+autoplay. Every generated hit says what it was meant to be, so the sink scores
+the side with nothing labelled:
+
+```
+crossings by decision          points by reason
+  ambiguous         1            double_bounce   1
+  counted          24            last_bounce     5
+mock: side right on 25 of 25 (100.0%)
+```
+
+The `ambiguous` there is the net ball. Both halves equally loud is the case the
+ratio cannot separate, and a detector claiming a side for it is guessing.
+
+**Autoplay is not a stress test yet.** Its bounces are clean and well spaced, so
+the detector gets them all right — useful for exercising the chain, not for
+finding where it breaks. The hard cases are the manual triggers, and making
+autoplay harsh (more crosstalk, tighter timing) is
+[#11](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/11)'s
+remaining half along with CSV replay.
+
+## Testing the sink alone
 
 ```bash
 task sink                       # one terminal
 task sink:mock                  # another
 ```
 
-The generator sends the same wire format the firmware does — chunked events,
+`log-sink mock` is the other half: it sends the same wire format the firmware
+does — chunked events,
 rallies, points, crossings that were counted and crossings that were not. Every
 generated hit carries `intended`, which is what lets the summary score the side
 with nothing labelled by hand:
