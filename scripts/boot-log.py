@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""Das Board zurücksetzen und mitlesen, was es beim Start sagt.
+"""Reset the board and read what it says on the way up.
 
-Die Bootzeilen sind die einzige Stelle, an der steht, aus welchem Slot die
-Firmware läuft und ob ihr Image bestätigt ist — und sie sind vorbei, bevor ein
-Monitor offen ist. Also: Reset auslösen und von der ersten Zeile an mitlesen.
+The boot lines are the only place that names the slot the firmware is running
+from and whether its image is confirmed, and they are over before a monitor can
+be opened. So: trigger the reset, and read from the first byte.
 
     python3 scripts/boot-log.py /dev/cu.usbserial-0001 14
 
-Mit --listen wird nicht zurückgesetzt, sondern nur zugehört. Das ist der Fall
-beim Rückroll-Test: dort startet das Board von selbst neu, und ein eigener
-Reset würde die Geschichte zerschneiden, die man gerade sehen will.
+The default of fourteen seconds is not arbitrary. A freshly uploaded image is
+on probation for ten, so the line confirming it arrives after that.
 
-Die Voreinstellung von 14 Sekunden ist kein Zufall: die Bewährungsfrist für ein
-frisch eingespieltes Image liegt bei zehn, die Bestätigung kommt also erst
-danach.
+With --listen nothing is reset, it only listens. That is the rollback case:
+there the board restarts on its own, and a reset of ours would cut in half the
+sequence the test exists to show.
 """
 
 import re
@@ -23,13 +22,13 @@ import time
 try:
     import serial
 except ImportError:
-    sys.exit("pyserial fehlt. Aufruf ueber `task boot`, das nimmt das Python "
-             "von PlatformIO, in dem es steckt.")
+    sys.exit("pyserial is missing. Run it through `task boot`, which uses the "
+             "python PlatformIO ships, where it is installed.")
 
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    nur_lauschen = "--listen" in sys.argv[1:]
+    listen_only = "--listen" in sys.argv[1:]
 
     port = args[0] if args else "/dev/cu.usbserial-0001"
     seconds = float(args[1]) if len(args) > 1 else 14.0
@@ -37,67 +36,67 @@ def main():
     try:
         s = serial.Serial(port, 115200, timeout=0.2)
     except Exception as e:
-        sys.exit("Port %s nicht zu oeffnen: %s\nLaeuft noch ein Monitor darauf?"
-                 % (port, e))
+        sys.exit("Cannot open %s: %s\nIs a monitor still holding it?" % (port, e))
 
-    if nur_lauschen:
-        print("Hoere %g s zu, ohne zurueckzusetzen ...\n" % seconds)
+    if listen_only:
+        print("Listening for %gs, resetting nothing ...\n" % seconds)
     else:
-        # DTR niedrig heisst IO0 hoch: normal starten, nicht in den Bootloader.
-        # RTS kurz hoch zieht EN auf Masse — das ist der Reset.
+        # DTR low means IO0 high: boot normally, not into the bootloader.
+        # RTS high briefly pulls EN to ground — that is the reset.
         s.dtr = False
         s.rts = True
         time.sleep(0.12)
         s.rts = False
-        print("Reset ausgeloest, lese %g s mit ...\n" % seconds)
+        print("Reset sent, reading for %gs ...\n" % seconds)
+
     raw = b""
-    ende = time.time() + seconds
-    while time.time() < ende:
+    until = time.time() + seconds
+    while time.time() < until:
         raw += s.read(4096)
     s.close()
 
     text = raw.decode("utf-8", "replace")
 
-    # Der CP2102-Treiber spuelt beim Reset Puffermuell aus. Der ist nicht vom
-    # Board und verdeckt sonst die zwei Zeilen, auf die es ankommt.
-    zeilen = []
-    for zeile in text.splitlines():
-        sauber = re.sub(r"[^\x20-\x7e]", "", zeile).strip()
-        if len(sauber) > 3 and re.search(r"[A-Za-z]{3}", sauber) \
-                and not re.fullmatch(r"[x ]+", sauber):
-            zeilen.append(sauber)
+    # The CP2102 driver flushes buffer noise on reset. It is not from the board
+    # and it buries the two lines that matter.
+    lines = []
+    for line in text.splitlines():
+        clean = re.sub(r"[^\x20-\x7e]", "", line).strip()
+        if len(clean) > 3 and re.search(r"[A-Za-z]{3}", clean) \
+                and not re.fullmatch(r"[x ]+", clean):
+            lines.append(clean)
 
-    # Gleiche Zeile mehrfach hintereinander: einmal zeigen, mit Zaehler.
-    vorige, wie_oft = None, 0
-    gefiltert = []
-    for z in zeilen:
-        if z == vorige:
-            wie_oft += 1
+    # The same line many times over: show it once, with a count.
+    previous, repeats = None, 0
+    folded = []
+    for line in lines:
+        if line == previous:
+            repeats += 1
             continue
-        if wie_oft:
-            gefiltert.append("  ... %dx wiederholt" % wie_oft)
-            wie_oft = 0
-        gefiltert.append(z)
-        vorige = z
-    if wie_oft:
-        gefiltert.append("  ... %dx wiederholt" % wie_oft)
+        if repeats:
+            folded.append("  ... repeated %dx" % repeats)
+            repeats = 0
+        folded.append(line)
+        previous = line
+    if repeats:
+        folded.append("  ... repeated %dx" % repeats)
 
-    for z in gefiltert:
-        print(z)
+    for line in folded:
+        print(line)
 
     if not raw:
-        if nur_lauschen:
-            print("(still geblieben — das Board hat in der Zeit nicht neu gestartet)")
+        if listen_only:
+            print("(stayed quiet — the board did not restart in that time)")
         else:
-            print("(nichts empfangen — haengt das Board am USB?)")
+            print("(nothing received — is the board plugged in?)")
         return
 
-    # Beim Zuhoeren sind zwei Starts erwartet: der neue Stand und, nach dem
-    # Absturz, der alte. Erst darueber hinaus ist es eine Schleife.
-    grenze = 4 if nur_lauschen else 3
+    # While listening, two starts are expected: the new image, and the one that
+    # replaces it. Only beyond that is it a loop.
+    limit = 4 if listen_only else 3
     starts = text.count("ets Jul")
-    if starts > grenze:
-        print("\nACHTUNG: %d Neustarts in %g s — das ist eine Bootschleife."
+    if starts > limit:
+        print("\nWARNING: %d restarts in %gs — that is a boot loop."
               % (starts, seconds))
 
 
