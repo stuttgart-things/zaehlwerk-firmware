@@ -13,21 +13,40 @@ piezo (mains) ─────────────────────┘
 
 ## Environments
 
-One PlatformIO project, three environments:
+One PlatformIO project. Two of the planned environments are written:
 
-| Env | Board | Power | Role |
-| --- | ----- | ----- | ---- |
-| `button` | ESP32-C3 Super Mini | Battery, deep sleep | Wake on press, send, sleep |
-| `hub` | ESP32 | Mains | Receive, forward over HTTP |
-| `piezo` | ESP32 | Mains | Hit detection, send over ESP-NOW; the board may also host the hub |
-
-```bash
-pio run -e button -t upload
-pio run -e hub -t upload
-```
+| Env | Board | Power | Role | State |
+| --- | ----- | ----- | ---- | ----- |
+| `piezo` | ESP32 dev module | Mains | Hit detection and scoreboard | written |
+| `piezo-test` | ESP32 dev module | Mains | Same firmware, starts in mock mode | written |
+| `native` | — the laptop | — | Unity tests of the rules | written |
+| `button` | ESP32-C3 Super Mini | Battery, deep sleep | Wake on press, send, sleep | [#2](../../issues/2) |
+| `hub` | ESP32 | Mains | Receive, forward over HTTP | [#3](../../issues/3) |
 
 Per-unit configuration — source id, hub MAC, wifi, API URL — is set by build
 flag, not by editing source.
+
+## Building and flashing
+
+Once, to get a place for wifi and OTA credentials that is not the repository:
+
+```bash
+cp secrets.ini.example secrets.ini      # then fill it in; it is gitignored
+```
+
+Without that file the build still works and falls back to the defaults in
+`include/config.h`.
+
+```bash
+pio run -e piezo                 # build
+pio run -e piezo -t upload       # flash over USB
+pio device monitor               # 115200 baud
+pio test -e native               # run the rule tests on the laptop
+```
+
+Both ESP32 environments use `default.csv`, the standard partition table with
+two app slots. Two slots are what makes an over-the-air update and a rollback
+possible at all — do not swap it for a single-slot table to win flash.
 
 ## Shared protocol
 
@@ -63,12 +82,17 @@ each with a gate that decides whether the next one happens:
 | 1 | Does the piezo hear the ball, and does it separate from bat clatter? | An evening | Weakest real bounce ≥ 2× the strongest disturbance (peak, or rise time) |
 | 2 | Does the counting logic get a real game right enough? | A week | Under ~1 correction per game |
 
-Both stages run as standalone Arduino IDE sketches, not as PlatformIO
-environments — they are a test rig, deliberately outside the ESP-NOW
-architecture. Stage 2 in particular opens its own access point and serves the
-scoreboard itself, so it can be tuned mid-game without reflashing. That is a
-measurement shortcut, not a second path to the API: the field devices still
-report over ESP-NOW to the hub as in [ADR-0001](docs/adr/0001-esp-now-to-a-hub.md).
+Both stages were built as standalone Arduino IDE sketches, deliberately outside
+the ESP-NOW architecture. Stage 2 in particular opens its own access point and
+serves the scoreboard itself, so it can be tuned mid-game without reflashing.
+That is a measurement shortcut, not a second path to the API: the field devices
+still report over ESP-NOW to the hub as in
+[ADR-0001](docs/adr/0001-esp-now-to-a-hub.md).
+
+Stage 2 now lives in `src/` as the `piezo` environment and is built and flashed
+with PlatformIO. The sketches stay where they are, unchanged, as the record of
+how the bench measurement was done — but nothing is developed in them any more,
+and the Arduino IDE is no longer part of the workflow.
 
 - Step-by-step build and measurement guide, macOS and Ubuntu:
   [docs/piezo-stufe-1-2.md](docs/piezo-stufe-1-2.md) — with breadboard drawings
@@ -77,7 +101,9 @@ report over ESP-NOW to the hub as in [ADR-0001](docs/adr/0001-esp-now-to-a-hub.m
 - [`sketches/stufe1-piezo-test`](sketches/stufe1-piezo-test) — one piezo on
   GPIO 34, serial plotter plus a CSV event mode (`nr,spitze,anstieg_us,dauer_us,pause_ms`)
 - [`sketches/stufe2-zaehlwerk-mvp`](sketches/stufe2-zaehlwerk-mvp) — two piezos
-  (GPIO 34/35), full counting logic, scoreboard on `http://192.168.4.1`
+  (GPIO 34/35), full counting logic, scoreboard on `http://192.168.4.1`;
+  carried over verbatim into `src/main.cpp`, with the rules split out into
+  `lib/game` so they can be tested off the board
 
 Sensing runs as its own task pinned to core 0 in stage 2; the web server on core
 1 would otherwise swallow bounces. Keep that split.
@@ -85,5 +111,7 @@ Sensing runs as its own task pinned to core 0 in stage 2; the web server on core
 ## Status
 
 Early. `button` and `hub` are the path to a working scoreboard and are still
-unwritten. `piezo` is being characterised on the bench first — see the stage
-gates above; the firmware environment follows once the sensing is proven.
+unwritten. `piezo` carries the stage 2 bench firmware and is where the work is:
+counting accuracy at the table is around half, and whether that is missed
+bounces, phantom hits, the wrong side or the scoring logic is not yet known.
+Diagnostic logging is what answers it.
