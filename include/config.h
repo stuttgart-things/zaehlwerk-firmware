@@ -23,6 +23,23 @@
 #define ZW_HOSTNAME "zaehlwerk"
 #endif
 
+// The network the board joins. Empty means it goes straight to its own access
+// point. This only seeds the first connection — once credentials are stored in
+// NVS through the web UI, those win (ADR-0002).
+#ifndef ZW_STA_SSID
+#define ZW_STA_SSID ""
+#endif
+#ifndef ZW_STA_PASS
+#define ZW_STA_PASS ""
+#endif
+
+// How long to wait for the network before carrying an access point instead.
+// Too short and a slow router loses the board to its own AP; too long and the
+// tournament case waits. Adjustable in the web UI, stored in NVS.
+#ifndef ZW_STA_TIMEOUT_MS
+#define ZW_STA_TIMEOUT_MS 15000
+#endif
+
 // Empty means OTA stays off. Deliberately without a default: an open update
 // path on somebody else's wifi is worse than none. The value comes from
 // secrets.ini.

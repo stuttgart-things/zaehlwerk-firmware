@@ -61,16 +61,42 @@ the USB cable is only needed for power and for the serial monitor.
 1. Flash `piezo` over USB once, with an OTA password set in `secrets.ini`. The
    serial line has to say `[ota] ready`. If it says `[ota] off: no password`,
    there is no `secrets.ini` and nothing below will work.
-2. Join the board's wifi — `Zaehlwerk`, password from `secrets.ini`.
+2. Nothing, if the board joined your network — it answers to
+   `zaehlwerk.local`. If it fell back to its own access point, join that; its
+   name carries the chip id (`Zaehlwerk-c4e32c`) and `task boot` prints it.
 3. *Upload* under **`piezo-ota`**, or:
 
 ```bash
 pio run -e piezo-ota -t upload
 ```
 
-The board is at `192.168.4.1` as long as it carries its own access point. That
-is what `upload_port` in `platformio.ini` says; change it once the board joins a
-router ([#14](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/14)).
+`upload_port` in `platformio.ini` is `zaehlwerk.local`, which resolves over
+Bonjour once the board has joined a network. While it carries its own access
+point instead, point the tasks at it:
+
+```bash
+task ota ESP_HOST=192.168.4.1
+```
+
+## Which network is it on
+
+Station mode is the normal case: the board joins the configured wifi and the
+laptop stays where it is — no switching, which also lets the log sink listen at
+the same time. If the network does not come up within the timeout (fifteen
+seconds by default) the board carries its own access point instead, and the web
+UI says which of the two happened, on what address, and **on which channel**.
+
+The channel is on the page because ESP-NOW peers have to sit on the channel the
+radio ended up on. A peer on the wrong channel reports a successful send into
+nothing, and that is not diagnosable from the peer.
+
+Credentials are seeded once from `secrets.ini` and can be changed in the web UI
+afterwards, which stores them in NVS and restarts. A wrong password is not a
+lockout: after the timeout the board is back on its own access point.
+
+```bash
+task board      # which network, address and channel, over HTTP
+```
 
 **The first upload will make macOS ask whether Python may accept incoming
 connections. Say yes.** espota does not push the firmware — it tells the board
@@ -170,11 +196,12 @@ not reuse a password from anywhere else for it.
 | `task check` | tools, board, serial port, passwords, wifi, git state |
 | `task flash` | the USB flash, refusing if a monitor holds the port |
 | `task boot` | reset and print the boot lines, so the slot and image state are visible |
-| `task ota` | the wifi check first, then the upload |
+| `task ota` | checks the board answers first, then uploads |
 | `task rollback` | the crash build, listening on the serial line from before the upload so the crash and the rollback are visible as they happen |
 | `task board` | ask a running board over HTTP what it is |
-| `task wifi:esp` / `task wifi:back` | switch to the board's access point and back |
+| `task board` | which network, address and channel it is on |
+| `task wifi:esp` / `task wifi:back` | join the board's own access point and come back |
 
-The wifi check in `task ota` exists because an upload from the wrong network
-fails as `No response from the ESP`, which reads like a dead board rather than
-a laptop on the wrong wifi.
+The reachability check in `task ota` exists because an upload to a board that
+is not there fails as `No response from the ESP`, which reads like dead hardware
+rather than a name that did not resolve or a laptop on another network.

@@ -13,10 +13,13 @@ vars:
   #   PORT=/dev/cu.SLAB_USBtoUART task flash
   PORT:
     sh: ls /dev/cu.usbserial-* 2>/dev/null | head -1
-  # Where the board answers. Fixed while it carries its own access point; in
-  # station mode (#14) this becomes zaehlwerk.local.
-  ESP_IP: '{{.ESP_IP | default "192.168.4.1"}}'
-  AP_SSID: '{{.AP_SSID | default "Zaehlwerk"}}'
+  # Where the board answers. Since #14 it joins the configured network and
+  # answers to zaehlwerk.local; while it carries its own access point instead,
+  # override it:  task ota ESP_HOST=192.168.4.1
+  ESP_HOST: '{{.ESP_HOST | default "zaehlwerk.local"}}'
+  # The board's own access point carries the chip id, so there is no default
+  # worth guessing. `task boot` prints the name. Pass it, or be asked.
+  AP_SSID: '{{.AP_SSID | default ""}}'
   WIFI_DEV: '{{.WIFI_DEV | default "en0"}}'
   # The python that has pyserial in it — PlatformIO's.
   PIO_PY: '{{.PIO_PY | default "$HOME/.platformio/penv/bin/python3"}}'
@@ -36,10 +39,12 @@ tasks:
           task flash      once, over USB
           task boot       reset and read the boot lines
 
-        After that everything goes over the air:
+        After that everything goes over the air, with the board on the
+        configured network and answering to zaehlwerk.local:
 
           task ota        send new firmware over wifi
           task rollback   upload a deliberately broken build, watch it come back
+          task board      ask it which network, address and channel it is on
 
         Everything else:
 
@@ -59,7 +64,10 @@ tasks:
         if [ -f secrets.ini ]; then
           gum confirm "secrets.ini already exists. Overwrite?" || exit 0
         fi
-        ap=$(gum input --password --header "Password of the access point the board carries" --value "pingpong")
+        sta=$(gum input --header "Wifi the board should join (empty: only its own access point)" --placeholder "SSID")
+        stapass=""
+        [ -z "$sta" ] || stapass=$(gum input --password --header "Password for $sta")
+        ap=$(gum input --password --header "Password of the access point the board falls back to" --value "pingpong")
         ota=$(gum input --password --header "OTA password (empty means OTA stays off)")
         {
           printf '%s\n' '; Written by `task setup`. Not committed, see .gitignore.'
@@ -67,12 +75,15 @@ tasks:
           printf 'ota_pass = %s\n' "$ota"
           printf '\nbuild_flags =\n'
           printf "    -DZW_AP_PASS='\"%s\"'\n" "$ap"
+          [ -z "$sta" ] || printf "    -DZW_STA_SSID='\"%s\"'\n" "$sta"
+          [ -z "$sta" ] || printf "    -DZW_STA_PASS='\"%s\"'\n" "$stapass"
         } > secrets.ini
         gum log --level info "secrets.ini written"
         if [ -z "$ota" ]; then
           gum log --level warn "With no OTA password there is no update path over the air."
         fi
-        gum log --level warn "The password is compiled in. Changing it means one more USB flash."
+        gum log --level warn "These are compiled in. Changing one means one more USB flash."
+        [ -z "$sta" ] || gum log --level info "The wifi only seeds the first connection; after that the web UI writes it to NVS."
 
   check:
     desc: Whether anything is in the way — tools, board, network, passwords
@@ -113,11 +124,12 @@ tasks:
           failures=$((failures+1))
         fi
 
-        if ifconfig {{.WIFI_DEV}} 2>/dev/null | grep -q 'inet 192\.168\.4\.'; then
-          gum log --level info "On the board's wifi — OTA can go ahead"
+        if curl -sf -m 3 "http://{{.ESP_HOST}}/version" >/dev/null 2>&1; then
+          gum log --level info "Board answers at {{.ESP_HOST}} — OTA can go ahead"
+        elif ifconfig {{.WIFI_DEV}} 2>/dev/null | grep -q 'inet 192\.168\.4\.'; then
+          gum log --level warn "On the board's own wifi but {{.ESP_HOST}} does not resolve — try ESP_HOST=192.168.4.1"
         else
-          net=$(ifconfig {{.WIFI_DEV}} 2>/dev/null | awk '/inet /{print $2}' | head -1)
-          gum log --level warn "Not on the board's wifi (currently ${net:-no address}) — 'task wifi:esp'"
+          gum log --level warn "{{.ESP_HOST}} does not answer — is the board up, and on the same network?"
         fi
 
         branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -189,13 +201,14 @@ tasks:
     silent: true
     cmds:
       - |
-        if ! curl -sf -m 4 "http://{{.ESP_IP}}/version" >/dev/null 2>&1; then
-          gum log --level warn "{{.ESP_IP}} does not answer — on the right wifi? 'task wifi:esp'"
+        if ! curl -sf -m 4 "http://{{.ESP_HOST}}/version" >/dev/null 2>&1; then
+          gum log --level warn "{{.ESP_HOST}} does not answer — is the board up and on the same network?"
           gum log --level info "The serial line works too: 'task boot'"
           exit 1
         fi
-        echo "Version: $(curl -s -m 4 http://{{.ESP_IP}}/version)"
-        echo "State:   $(curl -s -m 4 http://{{.ESP_IP}}/state)"
+        echo "Version: $(curl -s -m 4 http://{{.ESP_HOST}}/version)"
+        echo "Network: $(curl -s -m 4 http://{{.ESP_HOST}}/net)"
+        echo "State:   $(curl -s -m 4 http://{{.ESP_HOST}}/state)"
 
   ## ──────────────────────────────────────────────
   ## OVER THE AIR
@@ -205,16 +218,16 @@ tasks:
     desc: Send new firmware over wifi
     silent: true
     cmds:
-      - task: wifi:ensure
+      - task: net:ensure
       - |
         gum log --level info "The first upload makes macOS ask whether python may accept connections — say yes."
-        pio run -e piezo-ota -t upload
+        pio run -e piezo-ota -t upload --upload-port "{{.ESP_HOST}}"
 
   rollback:
     desc: Upload a deliberately broken build and watch the previous one come back
     silent: true
     cmds:
-      - task: wifi:ensure
+      - task: net:ensure
       - |
         set -e
         cat <<'EOF'
@@ -244,7 +257,7 @@ tasks:
           listener=""
         fi
 
-        pio run -e piezo-ota-crash -t upload || true
+        pio run -e piezo-ota-crash -t upload --upload-port "{{.ESP_HOST}}" || true
 
         if [ -n "$listener" ]; then
           gum log --level info "Uploaded. Waiting for the crash and the rollback ..."
@@ -258,26 +271,38 @@ tasks:
   ## WIFI
   ## ──────────────────────────────────────────────
 
-  wifi:ensure:
-    desc: Make sure the laptop is on the board's wifi
+  net:ensure:
+    desc: Make sure the board is reachable before an upload
     internal: true
     silent: true
     cmds:
       - |
-        ifconfig {{.WIFI_DEV}} 2>/dev/null | grep -q 'inet 192\.168\.4\.' && exit 0
-        gum log --level warn "The laptop is not on the board's wifi — the upload would go nowhere."
-        gum confirm "Switch to {{.AP_SSID}}?" || exit 1
+        curl -sf -m 3 "http://{{.ESP_HOST}}/version" >/dev/null 2>&1 && exit 0
+        gum log --level warn "{{.ESP_HOST}} does not answer — the upload would go nowhere."
+        gum log --level info "Since #14 the board joins the configured network. If it fell back to"
+        gum log --level info "its own access point, the laptop has to join that instead."
+        gum confirm "Join the board's own access point?" || exit 1
         task wifi:esp
+        curl -sf -m 3 "http://192.168.4.1/version" >/dev/null 2>&1 \
+          || { gum log --level error "Still nothing at 192.168.4.1. Is it running? 'task boot'"; exit 1; }
+        gum log --level warn "Reachable at 192.168.4.1 — rerun with ESP_HOST=192.168.4.1"
+        exit 1
 
   wifi:esp:
-    desc: Join the wifi the board carries
+    desc: Join the access point the board carries (its name holds the chip id)
     silent: true
     cmds:
       - |
         set -e
+        ssid="{{.AP_SSID}}"
+        if [ -z "$ssid" ]; then
+          gum log --level info "The name is on the boot line: 'Zaehlwerk-<chip id>'. 'task boot' prints it."
+          ssid=$(gum input --header "Name of the board's access point" --placeholder "Zaehlwerk-c4e32c")
+        fi
+        [ -n "$ssid" ] || { gum log --level error "No name, nothing to join."; exit 1; }
         pass=$(sed -nE "s/.*-DZW_AP_PASS='\"(.*)\"'.*/\1/p" secrets.ini 2>/dev/null | head -1)
-        [ -n "$pass" ] || pass=$(gum input --password --header "Password for {{.AP_SSID}}")
-        networksetup -setairportnetwork {{.WIFI_DEV}} "{{.AP_SSID}}" "$pass" >/dev/null 2>&1 || true
+        [ -n "$pass" ] || pass=$(gum input --password --header "Password for $ssid")
+        networksetup -setairportnetwork {{.WIFI_DEV}} "$ssid" "$pass" >/dev/null 2>&1 || true
         for i in $(seq 1 20); do
           if ifconfig {{.WIFI_DEV}} 2>/dev/null | grep -q 'inet 192\.168\.4\.'; then
             gum log --level info "Connected: $(ifconfig {{.WIFI_DEV}} | awk '/inet /{print $2}' | head -1)"
