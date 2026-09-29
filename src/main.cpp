@@ -32,6 +32,7 @@
 
 #include "config.h"
 #include "game.h"
+#include "version.h"
 
 /* ================= Konfiguration ================= */
 const int  PIN_A = ZW_PIN_A;
@@ -187,6 +188,8 @@ input[type=range]{width:100%}
 .entry.w{border-left-color:var(--orange)}
 .entry .f{font:700 12px ui-monospace,monospace;color:var(--muted)}
 .entry .h{font-size:11.5px;color:#B8541F;margin-top:2px}
+.foot{margin-top:14px;text-align:center;font:11px ui-monospace,monospace;color:var(--muted)}
+.foot.dirty{color:var(--orange)}
 </style></head><body><div class="wrap">
 
 <div class="board">
@@ -218,6 +221,8 @@ input[type=range]{width:100%}
 
 <div class="card"><h2>Protokoll</h2><div id="lg"></div></div>
 
+<div class="foot" id="ver"></div>
+
 </div><script>
 let halt=0;
 function go(u){halt=Date.now()+400;fetch(u).then(tick)}
@@ -245,6 +250,10 @@ function tick(){
   }).catch(()=>{});
 }
 setInterval(tick,400);tick();
+fetch('/version').then(r=>r.json()).then(v=>{
+  ver.textContent=v.fw+' \u00b7 '+v.git;
+  if(v.dirty)ver.classList.add('dirty');
+}).catch(()=>{});
 </script></body></html>)HTML";
 
 String jsonEscape(String s) { s.replace("\"", "'"); return s; }
@@ -268,8 +277,16 @@ void handleState() {
   server.send(200, "application/json", j);
 }
 
+void handleVersion() {
+  String j = String("{\"fw\":\"") + ZW_FW_VERSION
+           + "\",\"git\":\"" + ZW_GIT_HASH
+           + "\",\"dirty\":" + (ZW_GIT_DIRTY ? "true" : "false") + "}";
+  server.send(200, "application/json", j);
+}
+
 void setup() {
   Serial.begin(115200);
+  Serial.printf("\nZaehlwerk %s  git %s\n", ZW_FW_VERSION, ZW_GIT_HASH);
   Serial.println("Start Game");
 
   queue = xQueueCreate(16, sizeof(Treffer));
@@ -282,6 +299,7 @@ void setup() {
 
   server.on("/", []{ server.send_P(200, "text/html", SEITE); });
   server.on("/state", handleState);
+  server.on("/version", handleVersion);
   server.on("/punkt", []{
     sichern(); rally = "";
     char s = server.arg("s") == "B" ? 'B' : 'A';
