@@ -41,6 +41,11 @@ There is no wall clock in the firmware. `t_us` is monotonic and enough to order
 and measure; the sink stamps `recv_at` on arrival and that is what a person
 reads.
 
+`seq` counts every event the firmware produced, including those it did not send
+because no sink was configured yet. So the first `seq` a sink sees is not
+normally 0, and a sink must take the first one it sees as its baseline rather
+than reporting everything before it as lost.
+
 The sink adds, on every record it writes:
 
 ```json
@@ -118,10 +123,11 @@ thrown away — those are the interesting half.
   "baseline_a": 112, "baseline_b": 118,
   "cross_a_us": 0, "cross_b_us": 740,
   "ratio": 2.84,
+  "counted": true,
   "samples": {
-    "rate_hz": 20000,
-    "pre_us": 20000,
-    "t0_us": 91214567,
+    "pre_us": 0,
+    "n": 242,
+    "t_us": [0, 96, 191, "…"],
     "a": [110, 113, 109, "…"],
     "b": [117, 118, 116, "…"]
   }
@@ -134,10 +140,29 @@ thrown away — those are the interesting half.
 | `decision` | `counted`, `below_threshold`, `deadtime`, `ambiguous` |
 | `cross_*_us` | relative to the first crossing of either channel; the one that crossed first is `0` |
 | `ratio` | the two peaks normalised against their thresholds, the number `clear_ratio` is compared against |
+| `counted` | whether the crossing actually scored |
 | `samples` | pre-trigger ring buffer plus the peak window, both channels, raw ADC counts |
 
-`t0_us` is the timestamp of the first sample in the arrays, which is earlier
-than the event's `t_us` by `pre_us`.
+`samples.t_us` holds one offset per sample, in microseconds from the event's
+`t_us`. There is no single rate to state: the sampler reads as fast as the ADC
+allows inside the peak window and once per millisecond outside it, so a fixed
+`rate_hz` would be a fiction. `n` is how many triples the three arrays hold.
+
+`counted` is separate from `decision` on purpose. An `ambiguous` crossing still
+counts today exactly as it always has — the louder channel wins — because the
+change that measures detection must not be the change that alters it. When
+`clear_ratio` starts deciding, `counted` is what shows the difference between
+before and after in a recorded session.
+
+Two limits worth knowing before reading a curve:
+
+- The **pre-trigger holds what was sampled**, and outside the peak window that
+  is one sample per millisecond. Until [#10](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/10)
+  a pre-trigger is a handful of points, not a shape.
+- A crossing that does **not** count carries no window at all — `n` is 0 and
+  only the peaks are recorded. Running a peak window for it would spend thirty
+  milliseconds of blindness the detector did not previously spend, which would
+  contaminate the very measurement this exists for.
 
 `ambiguous` means both channels crossed and `ratio` stayed under `clear_ratio`
 — the firmware saw a bounce and does not claim to know whose. That is the case
@@ -174,8 +199,9 @@ transition.
 }
 ```
 
-`reason` is `last_bounce`, `double_bounce`, `single_bounce`, `serve_side`,
-`manual` or `undo`. `side` is the table half; `player` is that half resolved
+`reason` is `last_bounce`, `double_bounce`, `single_bounce`, `manual`, `undo`
+or `none`. It comes out of the rules as a token rather than being read back out
+of the German hint, which would be guessing. `side` is the table half; `player` is that half resolved
 through the current mapping, and `player_name` the name it carried at that
 moment ([ADR-0006](adr/0006-the-firmware-owns-the-half-to-player-mapping.md)).
 All three are stored, so a mapping that turns out to be wrong is correctable in
