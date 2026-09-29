@@ -16,6 +16,20 @@
 #define ZW_PIN_B 35  // Piezo unter Hälfte B
 #endif
 
+// --- Netz ---
+// Name für mDNS und für espota. Vollständig also zaehlwerk.local, sobald die
+// Namensauflösung steht (#14).
+#ifndef ZW_HOSTNAME
+#define ZW_HOSTNAME "zaehlwerk"
+#endif
+
+// Leer heißt: OTA bleibt aus. Absichtlich kein Vorgabewert — ein offener
+// Update-Pfad in einem fremden WLAN ist schlimmer als gar keiner. Der Wert
+// kommt aus secrets.ini.
+#ifndef ZW_OTA_PASS
+#define ZW_OTA_PASS ""
+#endif
+
 // --- Eigener Accesspoint --------------------------------------------------
 #ifndef ZW_AP_SSID
 #define ZW_AP_SSID "Zaehlwerk"

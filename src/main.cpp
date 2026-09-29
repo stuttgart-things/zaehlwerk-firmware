@@ -32,6 +32,7 @@
 
 #include "config.h"
 #include "game.h"
+#include "ota.h"
 #include "version.h"
 
 /* ================= Konfiguration ================= */
@@ -51,12 +52,20 @@ const int FENSTER_MS = 30;          // Vergleichsfenster zwischen den Kanälen
 struct Treffer { char seite; int spitzeA; int spitzeB; uint32_t t; };
 QueueHandle_t queue;
 
+// Handle, um das Sampling während eines Updates anzuhalten, und ein Zähler,
+// an dem sich von außen ablesen lässt, dass der Task wirklich läuft. Beides
+// braucht der Rollback: ohne einen Lebensbeweis des Sensortasks wäre ein
+// Image "sauber gestartet", das nur nicht mehr messen kann.
+TaskHandle_t sensorTaskHandle = nullptr;
+volatile uint32_t sensorTicks = 0;
+
 void sensorTask(void *) {
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
   uint32_t sperreBis = 0;
 
   for (;;) {
+    sensorTicks++;
     if (millis() < sperreBis) { vTaskDelay(1); continue; }
 
     int a = analogRead(PIN_A);
@@ -157,6 +166,7 @@ void neuesSpiel() {
 
 /* ================= Webserver ================= */
 WebServer server(80);
+bool webserverLaeuft = false;
 
 const char SEITE[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="de"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -190,6 +200,13 @@ input[type=range]{width:100%}
 .entry .h{font-size:11.5px;color:#B8541F;margin-top:2px}
 .foot{margin-top:14px;text-align:center;font:11px ui-monospace,monospace;color:var(--muted)}
 .foot.dirty{color:var(--orange)}
+.probe{margin-top:6px;font-size:11px;color:var(--orange)}
+.up{display:flex;flex-direction:column;gap:8px}
+.up input[type=file],.up input[type=password],.up select{width:100%;padding:9px;
+border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff}
+.bar{height:6px;border-radius:3px;background:#E7ECF0;overflow:hidden;display:none}
+.bar>i{display:block;height:100%;width:0;background:var(--orange)}
+.msg{font-size:12px;color:var(--muted);min-height:16px}
 </style></head><body><div class="wrap">
 
 <div class="board">
@@ -221,7 +238,22 @@ input[type=range]{width:100%}
 
 <div class="card"><h2>Protokoll</h2><div id="lg"></div></div>
 
+<div class="card"><h2>Firmware einspielen</h2>
+  <div class="up">
+    <select id="ut">
+      <option value="/update">Firmware (firmware.bin)</option>
+      <option value="/updatefs">Dateisystem (littlefs.bin)</option>
+    </select>
+    <input type="file" id="uf" accept=".bin">
+    <input type="password" id="up" placeholder="OTA-Passwort" autocomplete="off">
+    <button onclick="senden()">Einspielen</button>
+    <div class="bar" id="ub"><i id="ubi"></i></div>
+    <div class="msg" id="um"></div>
+  </div>
+</div>
+
 <div class="foot" id="ver"></div>
+<div class="probe" id="pb"></div>
 
 </div><script>
 let halt=0;
@@ -243,6 +275,10 @@ function tick(){
       `<div class="entry${e.h?' w':''}"><div class="f">${[...e.f].join(' → ')}</div>
        <div>${e.u}</div>${e.h?`<div class="h">${e.h}</div>`:''}</div>`).reverse().join('')
       :'<div style="color:#5C6B7A;font-size:13px">Noch nichts gespielt.</div>';
+    pb.textContent = d.img==='pending'
+      ? 'Neuer Stand laeuft auf Probe. Bewaehrt er sich, wird er bestaetigt; '
+        +'stuerzt er ab, kommt der alte von selbst zurueck.'
+      : '';
     if(document.activeElement.type!=='range'){
       ra.value=d.ta;rb.value=d.tb;rt.value=d.to;
       la.textContent=d.ta;lb.textContent=d.tb;lt.textContent=d.to;
@@ -250,6 +286,24 @@ function tick(){
   }).catch(()=>{});
 }
 setInterval(tick,400);tick();
+function senden(){
+  if(!uf.files.length){um.textContent='Erst eine .bin waehlen.';return}
+  if(!up.value){um.textContent='Ohne Passwort geht es nicht.';return}
+  const fd=new FormData();fd.append('f',uf.files[0]);
+  const x=new XMLHttpRequest();
+  x.open('POST',ut.value,true);
+  x.setRequestHeader('Authorization','Basic '+btoa('zaehlwerk:'+up.value));
+  ub.style.display='block';um.textContent='Laedt hoch...';halt=Date.now()+600000;
+  x.upload.onprogress=e=>{if(e.lengthComputable)ubi.style.width=(e.loaded/e.total*100)+'%'};
+  x.onload=()=>{
+    um.textContent=x.status===200
+      ?'Eingespielt. Der ESP startet neu — die Seite kommt in ein paar Sekunden zurueck.'
+      :(x.status===401?'Passwort falsch.':'Fehlgeschlagen: '+x.responseText);
+    if(x.status===200)setTimeout(()=>location.reload(),8000);else halt=0;
+  };
+  x.onerror=()=>{um.textContent='Verbindung abgebrochen.';halt=0};
+  x.send(fd);
+}
 fetch('/version').then(r=>r.json()).then(v=>{
   ver.textContent=v.fw+' \u00b7 '+v.git;
   if(v.dirty)ver.classList.add('dirty');
@@ -267,6 +321,8 @@ void handleState() {
   j += ",\"rally\":\"" + rally + "\"";
   j += ",\"ta\":" + String(schwelleA) + ",\"tb\":" + String(schwelleB);
   j += ",\"to\":" + String(rallyTimeout);
+  j += ",\"img\":\"" + String(ota::imageState()) + "\"";
+  j += ",\"up\":" + String(ota::progress());
   j += ",\"log\":[";
   for (int i = 0; i < logAnzahl; i++) {
     if (i) j += ",";
@@ -284,13 +340,29 @@ void handleVersion() {
   server.send(200, "application/json", j);
 }
 
+// Ein Update schreibt in den zweiten App-Slot. Währenddessen soll kein Task
+// mehr Flash und CPU beanspruchen, und die laufende Partie gehört beendet und
+// nicht mitten im Ballwechsel abgeschnitten. Das Session-Ende als Log-Ereignis
+// kommt mit #15; hier ist es vorerst die serielle Zeile.
+void samplingAnhalten() {
+  if (sensorTaskHandle) vTaskSuspend(sensorTaskHandle);
+  if (rally.length() > 0) rallyBeenden();
+  xQueueReset(queue);
+  Serial.println("[ota] Sampling angehalten, Session beendet");
+}
+
+void samplingFortsetzen() {
+  if (sensorTaskHandle) vTaskResume(sensorTaskHandle);
+  Serial.println("[ota] Sampling laeuft weiter");
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.printf("\nZaehlwerk %s  git %s\n", ZW_FW_VERSION, ZW_GIT_HASH);
   Serial.println("Start Game");
 
   queue = xQueueCreate(16, sizeof(Treffer));
-  xTaskCreatePinnedToCore(sensorTask, "sensor", 4096, NULL, 3, NULL, 0);
+  xTaskCreatePinnedToCore(sensorTask, "sensor", 4096, NULL, 3, &sensorTaskHandle, 0);
 
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASS);
@@ -315,10 +387,25 @@ void setup() {
     server.send(200, "text/plain", "ok");
   });
   server.begin();
+  webserverLaeuft = true;
+
+  ota::begin(server, { ZW_HOSTNAME, ZW_OTA_PASS, samplingAnhalten, samplingFortsetzen });
+}
+
+// Das Urteil über den eigenen Start, auf das der Rollback hört. Absichtlich
+// mehr als "setup() ist durchgelaufen": das WLAN steht, der Webserver hört zu,
+// und der Sensortask ist oft genug durch seine Schleife gekommen, dass er
+// nicht bloß erzeugt, sondern am Laufen ist.
+bool startWarSauber() {
+  return webserverLaeuft
+      && WiFi.softAPIP() != IPAddress((uint32_t)0)
+      && sensorTicks > 1000;
 }
 
 void loop() {
   server.handleClient();
+  ota::handle();
+  ota::tick(startWarSauber());
 
   Treffer t;
   while (xQueueReceive(queue, &t, 0) == pdTRUE) {
