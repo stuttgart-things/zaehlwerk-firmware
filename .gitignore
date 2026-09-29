@@ -8,6 +8,10 @@
 # Lokale Zugangsdaten — WLAN, OTA. Vorlage: secrets.ini.example
 secrets.ini
 
+# Task und mkdocs
+.task/
+site/
+
 # Editoren
 .vscode/
 .idea/
