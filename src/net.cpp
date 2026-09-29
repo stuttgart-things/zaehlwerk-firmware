@@ -53,11 +53,15 @@ void openAccessPoint(const Config &cfg) {
 void begin(const Config &cfg) {
   hostname_ = cfg.hostname;
 
+  // isKey() before getString(), because getString() on a key that was never
+  // written logs at error level. On a first boot that is the normal state, and
+  // two lines of NOT_FOUND read like a fault where there is none.
   Preferences prefs;
   prefs.begin(NVS_NAMESPACE, /*readOnly=*/false);
-  String ssid = prefs.getString(KEY_SSID, "");
-  String pass = prefs.getString(KEY_PASS, "");
-  timeout_ = prefs.getUInt(KEY_TIMEOUT, cfg.staTimeoutMs);
+  String ssid = prefs.isKey(KEY_SSID) ? prefs.getString(KEY_SSID, "") : String();
+  String pass = prefs.isKey(KEY_PASS) ? prefs.getString(KEY_PASS, "") : String();
+  timeout_ = prefs.isKey(KEY_TIMEOUT) ? prefs.getUInt(KEY_TIMEOUT, cfg.staTimeoutMs)
+                                      : cfg.staTimeoutMs;
   prefs.end();
 
   // A build flag out of secrets.ini seeds the first connection. It is not
@@ -146,7 +150,7 @@ void setStaTimeout(uint32_t ms) {
 bool haveCredentials() {
   Preferences prefs;
   prefs.begin(NVS_NAMESPACE, true);
-  bool have = prefs.getString(KEY_SSID, "").length() > 0;
+  bool have = prefs.isKey(KEY_SSID) && prefs.getString(KEY_SSID, "").length() > 0;
   prefs.end();
   return have;
 }

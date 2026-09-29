@@ -13,6 +13,10 @@ vars:
   #   PORT=/dev/cu.SLAB_USBtoUART task flash
   PORT:
     sh: ls /dev/cu.usbserial-* 2>/dev/null | head -1
+  # curl gets -4 everywhere below. Resolving a .local name for AAAA can sit in a
+  # timeout for five seconds before IPv4 is tried, which looks exactly like a
+  # board that is not answering. With -4 the same request takes 0.1s.
+  #
   # Where the board answers. Since #14 it joins the configured network and
   # answers to zaehlwerk.local; while it carries its own access point instead,
   # override it:  task ota ESP_HOST=192.168.4.1
@@ -124,7 +128,7 @@ tasks:
           failures=$((failures+1))
         fi
 
-        if curl -sf -m 3 "http://{{.ESP_HOST}}/version" >/dev/null 2>&1; then
+        if curl -4 -sf -m 5 "http://{{.ESP_HOST}}/version" >/dev/null 2>&1; then
           gum log --level info "Board answers at {{.ESP_HOST}} — OTA can go ahead"
         elif ifconfig {{.WIFI_DEV}} 2>/dev/null | grep -q 'inet 192\.168\.4\.'; then
           gum log --level warn "On the board's own wifi but {{.ESP_HOST}} does not resolve — try ESP_HOST=192.168.4.1"
@@ -201,14 +205,14 @@ tasks:
     silent: true
     cmds:
       - |
-        if ! curl -sf -m 4 "http://{{.ESP_HOST}}/version" >/dev/null 2>&1; then
+        if ! curl -4 -sf -m 5 "http://{{.ESP_HOST}}/version" >/dev/null 2>&1; then
           gum log --level warn "{{.ESP_HOST}} does not answer — is the board up and on the same network?"
           gum log --level info "The serial line works too: 'task boot'"
           exit 1
         fi
-        echo "Version: $(curl -s -m 4 http://{{.ESP_HOST}}/version)"
-        echo "Network: $(curl -s -m 4 http://{{.ESP_HOST}}/net)"
-        echo "State:   $(curl -s -m 4 http://{{.ESP_HOST}}/state)"
+        echo "Version: $(curl -4 -s -m 5 http://{{.ESP_HOST}}/version)"
+        echo "Network: $(curl -4 -s -m 5 http://{{.ESP_HOST}}/net)"
+        echo "State:   $(curl -4 -s -m 5 http://{{.ESP_HOST}}/state)"
 
   ## ──────────────────────────────────────────────
   ## OVER THE AIR
@@ -277,13 +281,13 @@ tasks:
     silent: true
     cmds:
       - |
-        curl -sf -m 3 "http://{{.ESP_HOST}}/version" >/dev/null 2>&1 && exit 0
+        curl -4 -sf -m 5 "http://{{.ESP_HOST}}/version" >/dev/null 2>&1 && exit 0
         gum log --level warn "{{.ESP_HOST}} does not answer — the upload would go nowhere."
         gum log --level info "Since #14 the board joins the configured network. If it fell back to"
         gum log --level info "its own access point, the laptop has to join that instead."
         gum confirm "Join the board's own access point?" || exit 1
         task wifi:esp
-        curl -sf -m 3 "http://192.168.4.1/version" >/dev/null 2>&1 \
+        curl -4 -sf -m 5 "http://192.168.4.1/version" >/dev/null 2>&1 \
           || { gum log --level error "Still nothing at 192.168.4.1. Is it running? 'task boot'"; exit 1; }
         gum log --level warn "Reachable at 192.168.4.1 — rerun with ESP_HOST=192.168.4.1"
         exit 1
