@@ -39,10 +39,41 @@ the bench, unicast for a laptop on the office wifi.
 The sink is `tools/log-sink`, a Go program that writes one append-only JSONL
 per session and serves the labelling UI.
 
+## Amendment: curves may be lost, points must not
+
+Added after a game was played through and lost. No sink was listening, logging
+was off, and nothing said so — and because this path holds nothing, the game did
+not exist the moment it ended.
+
+"Lossy by design" was right about why, and too broad about what. Two kinds of
+event are mixed under it:
+
+A **hit** carries hundreds of raw samples. It is large, it arrives hundreds of
+times a game, and it is only worth anything while somebody is working on
+detection. Holding those would cost the memory the sampler needs and buy little.
+
+A **point**, a **rally**, a **correction**, a **change of ends** — these are a
+few hundred bytes each, perhaps fifty in a game, and they are the record of what
+happened. They cannot be reconstructed from anywhere else once the board is
+switched off.
+
+So: **an event that fits in a single datagram is held when no sink is listening,
+and sent when one appears.** Anything larger is dropped as before. The rule is
+the datagram rather than the event type, because it is the same rule the
+chunking already uses and it needs no table to stay correct when a new event is
+added.
+
+This does not weaken the first rule. Holding an event is a memcpy on the network
+core; the sampler still never blocks, and a full buffer drops the oldest rather
+than waiting. What arrives late is marked as such — a `note` says how many
+events were held and for how long, so nobody reads a flush as a burst of play.
+
 ## Consequences
 
 - UDP loses packets and this one has no retry, so loss has to be visible rather
-  than silent. Every event carries a monotonic sequence number, and the sink
+  than silent. Since the amendment above, an event small enough to fit a
+  datagram survives a sink that is not there; a hit with its samples still does
+  not. Every event carries a monotonic sequence number, and the sink
   reports the gaps. A session with holes is still usable; a session that
   silently dropped a third of its hits would not be.
 - The firmware needs no ack path, no buffering for the sink and no back

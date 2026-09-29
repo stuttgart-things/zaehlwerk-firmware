@@ -23,7 +23,8 @@ func newTestSink(t *testing.T) (*Sink, string) {
 
 func lines(t *testing.T, dir string) []string {
 	t.Helper()
-	m, _ := filepath.Glob(filepath.Join(dir, "sessions", "*.jsonl"))
+	// Sessions live under the day they were recorded.
+	m, _ := filepath.Glob(filepath.Join(dir, "*", "sessions", "*.jsonl"))
 	if len(m) != 1 {
 		t.Fatalf("expected one session file, got %d", len(m))
 	}

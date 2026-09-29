@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,6 +46,7 @@ type Session struct {
 	firstSeq  uint64
 	lastSeq   uint64
 
+	GamesDir string
 	Records  uint64
 	Lost     uint64
 	Late     uint64
@@ -68,24 +70,33 @@ type Session struct {
 }
 
 func NewSink(dir string, patience time.Duration) (*Sink, error) {
-	if err := os.MkdirAll(filepath.Join(dir, "sessions"), 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	return &Sink{dir: dir, patience: patience, sessions: map[string]*Session{}}, nil
+}
+
+// Everything a day produced lives under that day. An evening's play is what
+// somebody goes looking for, not a session id they never saw.
+func (s *Sink) dayDir(now time.Time, sub string) string {
+	return filepath.Join(s.dir, now.Format("2006-01-02"), sub)
 }
 
 func (s *Sink) session(id string, now time.Time) (*Session, error) {
 	if se, ok := s.sessions[id]; ok {
 		return se, nil
 	}
-	path := filepath.Join(s.dir, "sessions",
-		fmt.Sprintf("%s-%s.jsonl", now.Format("20060102-150405"), id))
+	dir := s.dayDir(now, "sessions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%s-%s.jsonl", now.Format("150405"), id))
 	fh, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, err
 	}
 	se := &Session{
-		ID: id, Path: path, Started: now,
+		ID: id, Path: path, Started: now, GamesDir: s.dayDir(now, "games"),
 		fh: fh, file: bufio.NewWriterSize(fh, 64*1024),
 		pending:     map[uint64]*pending{},
 		Counts:      map[string]uint64{},
@@ -123,6 +134,9 @@ func (s *Sink) Handle(raw []byte, now time.Time) {
 		se.noteSeq(env.Seq, now)
 		se.write(raw, now)
 		se.count(raw, env.Type)
+		// Both paths, not one: a point is small enough for a single datagram
+		// and never reaches the reassembly below, which is where this was.
+		s.maybeExport(se, raw, env.Type)
 		return
 	}
 
@@ -156,6 +170,33 @@ func (s *Sink) Handle(raw []byte, now time.Time) {
 	}
 	se.write(joined, now)
 	se.count(joined, inner.Type)
+	s.maybeExport(se, joined, inner.Type)
+}
+
+// A finished game gets its own file the moment it finishes. Going back through
+// a session afterwards works, but somebody who just played wants the thing they
+// played, now, without knowing what a session is.
+func (s *Sink) maybeExport(se *Session, raw []byte, typ string) {
+	if typ != "point" {
+		return
+	}
+	var p struct {
+		To struct {
+			Over bool `json:"over"`
+		} `json:"to"`
+	}
+	if json.Unmarshal(raw, &p) != nil || !p.To.Over {
+		return
+	}
+	se.file.Flush()
+	written, err := exportGames(se.Path, se.GamesDir, false)
+	if err != nil {
+		se.writeSink(time.Now(), fmt.Sprintf(`"kind":"export_failed","error":%q`, err.Error()))
+		return
+	}
+	if n := len(written); n > 0 {
+		fmt.Printf("game finished: %s\n", written[n-1])
+	}
 }
 
 func (s *Sink) any() *Session {
@@ -191,6 +232,10 @@ func (s *Sink) Close() {
 	defer s.mu.Unlock()
 	for _, se := range s.sessions {
 		se.file.Flush()
+		// A game still in progress when the recording stops is still a game.
+		if _, err := exportGames(se.Path, se.GamesDir, false); err != nil {
+			fmt.Println("export:", err)
+		}
 		se.fh.Close()
 	}
 }

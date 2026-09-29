@@ -27,6 +27,23 @@ const int QUEUE_DEPTH = 4;
 WiFiUDP udp;
 QueueHandle_t queue_ = nullptr;
 
+// Held events, for when no sink is listening yet. Curves may be lost, points
+// must not (ADR-0004). The rule is the datagram, not the event type: anything
+// that fits in one is cheap enough to keep, and that needs no table to stay
+// correct when a new kind of event is added.
+//
+// A linear arena rather than a ring: dropping the oldest happens only when
+// nobody has listened for a very long time, and a memmove then is cheaper than
+// wrap-around arithmetic on every write.
+const size_t PUFFER_BYTES = 16384;
+const int PUFFER_MAX = 96;
+uint8_t arena_[PUFFER_BYTES];
+uint16_t laengen_[PUFFER_MAX];
+size_t genutzt_ = 0;
+int gehalten_ = 0;
+uint32_t haltenSeitMs_ = 0;
+uint32_t verworfen_ = 0;   // too large to hold, or dropped to make room
+
 char sessionId_[9] = "00000000";
 uint32_t seq_ = 0;
 uint32_t dropped_ = 0;
@@ -51,6 +68,29 @@ String esc(const String &in) {
 
 bool sendable() { return on_ && host_.length() > 0; }
 
+void aeltestenVerwerfen() {
+  if (gehalten_ == 0) return;
+  const uint16_t weg = laengen_[0];
+  memmove(arena_, arena_ + weg, genutzt_ - weg);
+  memmove(laengen_, laengen_ + 1, sizeof(uint16_t) * (gehalten_ - 1));
+  genutzt_ -= weg;
+  gehalten_--;
+  verworfen_++;
+}
+
+void halten(const String &payload) {
+  const size_t n = payload.length();
+  if (n > MAX_PAYLOAD) { verworfen_++; return; }   // a curve; let it go
+  while (gehalten_ >= PUFFER_MAX || genutzt_ + n > PUFFER_BYTES) {
+    if (gehalten_ == 0) { verworfen_++; return; }
+    aeltestenVerwerfen();
+  }
+  memcpy(arena_ + genutzt_, payload.c_str(), n);
+  laengen_[gehalten_++] = (uint16_t)n;
+  genutzt_ += n;
+  if (!haltenSeitMs_) haltenSeitMs_ = millis();
+}
+
 void transmit(const String &payload) {
   IPAddress ip;
   if (!ip.fromString(host_)) return;  // a name would need a lookup; not here
@@ -63,7 +103,10 @@ void transmit(const String &payload) {
 // the sink joins the parts before parsing — chunks are not documents of their
 // own, which keeps reassembly from needing a parser that tolerates halves.
 void emit(uint32_t seq, const String &body) {
-  if (!sendable()) return;
+  if (!sendable()) {
+    halten(body);
+    return;
+  }
 
   if (body.length() <= MAX_PAYLOAD) {
     transmit(body);
@@ -200,7 +243,38 @@ void newSession(const char *sensor, const char *reason) {
   sayHello();
 }
 
+// Sends a few of the held events per call rather than all of them at once: a
+// hundred datagrams into a socket buffer in one go is how a flush turns into
+// the loss it was meant to prevent.
+void nachschicken() {
+  if (!sendable() || gehalten_ == 0) return;
+
+  if (haltenSeitMs_) {
+    const uint32_t wie_lange = (millis() - haltenSeitMs_) / 1000;
+    haltenSeitMs_ = 0;
+    // Said in the file, so nobody reads a flush as a burst of play. Sent first,
+    // before the events it describes.
+    note("info", String("sending ") + gehalten_ + " events held for " +
+                     wie_lange + "s with no sink listening");
+  }
+
+  int wie_viele = 4;
+  size_t ab = 0;
+  int i = 0;
+  for (; i < gehalten_ && wie_viele > 0; i++, wie_viele--) {
+    String p;
+    p.concat((const char *)(arena_ + ab), laengen_[i]);
+    transmit(p);
+    ab += laengen_[i];
+  }
+  memmove(arena_, arena_ + ab, genutzt_ - ab);
+  memmove(laengen_, laengen_ + i, sizeof(uint16_t) * (gehalten_ - i));
+  genutzt_ -= ab;
+  gehalten_ -= i;
+}
+
 void tick() {
+  nachschicken();
   if (!queue_) return;
   static Hit h;
   while (xQueueReceive(queue_, &h, 0) == pdTRUE) emitHit(h);
@@ -295,6 +369,8 @@ bool enabled() { return sendable(); }
 const String &sinkHost() { return host_; }
 uint16_t sinkPort() { return port_; }
 const char *sessionId() { return sessionId_; }
-uint32_t droppedEvents() { return dropped_; }
+uint32_t droppedEvents() { return dropped_ + verworfen_; }
+
+int heldEvents() { return gehalten_; }
 
 }  // namespace diag

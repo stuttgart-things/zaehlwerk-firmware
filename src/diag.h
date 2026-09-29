@@ -120,4 +120,7 @@ uint16_t sinkPort();
 const char *sessionId();
 uint32_t droppedEvents();
 
+// How many events are waiting for a sink to appear.
+int heldEvents();
+
 }  // namespace diag

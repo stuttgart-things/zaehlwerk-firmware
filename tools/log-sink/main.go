@@ -8,6 +8,7 @@
 //	log-sink                       listen on :9000, viewer on :9001
 //	log-sink -dir ./data           somewhere else to write
 //	log-sink export <file.jsonl>   a zip with the file and a summary
+//	log-sink games <file.jsonl>    one readable JSON per game, curves left out
 //	log-sink mock                  send a made-up session at it, no board needed
 package main
 
@@ -29,6 +30,11 @@ func main() {
 		switch os.Args[1] {
 		case "export":
 			if err := runExport(os.Args[2:]); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "games":
+			if err := runGames(os.Args[2:]); err != nil {
 				log.Fatal(err)
 			}
 			return

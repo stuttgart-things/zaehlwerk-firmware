@@ -27,7 +27,44 @@ moment still carries the firmware version, the git hash and every parameter. A
 file without that event is a file that cannot be compared with another one, and
 the viewer says so rather than drawing a curve with no thresholds beside it.
 
-Sessions land in `sessions/<date>-<time>-<session id>.jsonl`.
+Everything a day produced lives under that day:
+
+```
+sink-data/
+  2026-09-29/
+    sessions/181829-e32cb6ad.jsonl      everything that arrived
+    games/181829-e32cb6ad-game2.json    one file per game
+```
+
+**A game gets its own file the moment it finishes.** The session file is the raw
+record — every curve, hundreds of kilobytes of ADC counts. The game file is what
+happened: every crossing with its peaks, its ratio, what the logic decided and
+why, grouped by rally, with the point and any correction attached. Around forty
+kilobytes for a full game, which is small enough to read in one go or hand to
+somebody.
+
+```json
+{ "game": 2, "final": {"a": 8, "b": 11, "winner": "B", "winner_name": "Ana"},
+  "firmware": {"git": "4526ff9", "sensor": "mock"},
+  "transport": {"records": 148, "lost": 0, "incomplete": 0},
+  "rallies": [ { "rally_id": "…-r2", "sequence": "ABABABA",
+                 "hits": [ {"side":"B","decision":"counted","peak_a":264,
+                            "peak_b":1539,"ratio":5.83,"samples":256} ],
+                 "point": {"reason":"last_bounce","side":"A","player_name":"Pat"} } ],
+  "summary": { "rallies": 19, "crossings": 72,
+               "crossings_by_decision": {"counted": 72} } }
+```
+
+The raw curves are left out by default — they are what makes a session file
+large and they only matter while somebody is working on detection. `-samples`
+keeps them.
+
+Splitting an older session by hand goes through the same code, so a file written
+live and one written afterwards mean the same thing:
+
+```bash
+task sink:games SESSION=sink-data/2026-09-29/sessions/181829-e32cb6ad.jsonl
+```
 
 ## What it reports
 

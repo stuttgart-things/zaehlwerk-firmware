@@ -128,14 +128,22 @@ func page(w http.ResponseWriter, title, body string) {
 }
 
 func serveViewer(addr, dir string, sink *Sink) {
-	sessionsDir := filepath.Join(dir, "sessions")
+	// Sessions live under the day they were recorded, so the listing looks
+	// across all of them and the file name alone still finds one.
+	findSession := func(name string) string {
+		m, _ := filepath.Glob(filepath.Join(dir, "*", "sessions", name))
+		if len(m) > 0 {
+			return m[0]
+		}
+		return filepath.Join(dir, "sessions", name)
+	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		entries, _ := filepath.Glob(filepath.Join(sessionsDir, "*.jsonl"))
+		entries, _ := filepath.Glob(filepath.Join(dir, "*", "sessions", "*.jsonl"))
 		sort.Sort(sort.Reverse(sort.StringSlice(entries)))
 
 		var b strings.Builder
@@ -164,7 +172,7 @@ func serveViewer(addr, dir string, sink *Sink) {
 
 	http.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
 		name := filepath.Base(r.URL.Query().Get("f"))
-		evs, _, err := readSession(filepath.Join(sessionsDir, name))
+		evs, _, err := readSession(findSession(name))
 		if err != nil {
 			http.Error(w, err.Error(), 404)
 			return
@@ -230,7 +238,7 @@ Showing the first 500 that match. Narrow it with a filter — the file has them 
 	http.HandleFunc("/event", func(w http.ResponseWriter, r *http.Request) {
 		name := filepath.Base(r.URL.Query().Get("f"))
 		seq, _ := strconv.ParseUint(r.URL.Query().Get("seq"), 10, 64)
-		evs, params, err := readSession(filepath.Join(sessionsDir, name))
+		evs, params, err := readSession(findSession(name))
 		if err != nil {
 			http.Error(w, err.Error(), 404)
 			return
