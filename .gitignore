@@ -1,0 +1,17 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+
+# Lokale Zugangsdaten — WLAN, OTA. Vorlage: secrets.ini.example
+secrets.ini
+
+# Editoren
+.vscode/
+.idea/
+compile_commands.json
+
+# macOS
+.DS_Store
