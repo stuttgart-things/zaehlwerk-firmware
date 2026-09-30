@@ -1,6 +1,7 @@
 #include "ota.h"
 
 #include <ArduinoOTA.h>
+#include <LittleFS.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
 
@@ -38,9 +39,21 @@ bool authorised() {
   return server_->authenticate("zaehlwerk", cfg_.password);
 }
 
+// Writing the filesystem partition while it is mounted means overwriting the
+// ground a mounted filesystem is standing on: LittleFS holds cached metadata and
+// would serve from blocks that no longer say what it thinks. Unmount first.
+// If the upload then fails, the page stays gone until a reboot — which is the
+// case the recovery page exists for, and it can retry the upload itself.
+void unmountForFilesystem(int kind) {
+  if (kind != U_SPIFFS) return;
+  LittleFS.end();
+  Serial.println("[ota] filesystem unmounted for the write");
+}
+
 void beginUpdate(int kind) {
   progress_ = 0;
   if (cfg_.pause) cfg_.pause();
+  unmountForFilesystem(kind);
   Update.begin(UPDATE_SIZE_UNKNOWN, kind);
 }
 
@@ -115,8 +128,15 @@ void handleUploadDone() {
     server_->send(500, "text/plain", "Update fehlgeschlagen. Alter Stand laeuft weiter.\n");
     return;
   }
-  server_->send(200, "text/plain", "Update eingespielt, Neustart. Laeuft der neue Stand "
-                                   "nicht, kommt der alte von selbst zurueck.\n");
+  // Only firmware has a second slot and a rollback. The filesystem is written in
+  // place, so promising one here would be a lie at the worst possible moment.
+  const bool fs = server_->uri().endsWith("fs");
+  server_->send(200, "text/plain",
+                fs ? "Dateisystem eingespielt, Neustart. Es gibt nur eine "
+                     "Partition: ist das Abbild kaputt, meldet sich die "
+                     "Notfallseite und nimmt ein neues an.\n"
+                   : "Update eingespielt, Neustart. Laeuft der neue Stand "
+                     "nicht, kommt der alte von selbst zurueck.\n");
   delay(200);
   ESP.restart();
 }
@@ -169,6 +189,7 @@ void begin(WebServer &server, const Config &cfg) {
     // while flash is being written nothing else should want flash and CPU, and
     // the running session belongs ended cleanly rather than cut in half.
     if (cfg_.pause) cfg_.pause();
+    unmountForFilesystem(ArduinoOTA.getCommand());
   });
   ArduinoOTA.onProgress([](unsigned int now, unsigned int total) {
     progress_ = total ? (int)((now * 100ULL) / total) : 0;

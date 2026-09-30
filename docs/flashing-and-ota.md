@@ -53,6 +53,33 @@ The icons in the blue bar at the bottom act on the **default environments**,
 which are `piezo` and `piezo-test`. For anything else, use the task under its
 environment in the panel.
 
+## Two images, not one
+
+The web UI is `data/index.html`, flashed into the LittleFS partition. It is not
+compiled into the firmware, so there are two things to write:
+
+```bash
+pio run -e piezo -t upload     # the firmware
+pio run -e piezo -t uploadfs   # the web UI
+```
+
+`task flash` does both. Over the air the same split applies: `task ota` for the
+firmware, `task ota:fs` for the page.
+
+Forgetting the second one is the obvious mistake, so it is caught rather than
+punished: a board with no `/index.html` answers `/` with **HTTP 503** and a
+recovery page that can upload either image itself. Verified on hardware — a
+firmware-only OTA produced exactly that page, and `/updatefs` with
+`littlefs.bin` (1.4 MB, 5.5 s) brought the real one back byte for byte.
+
+One asymmetry worth knowing: **the filesystem has no second slot and no
+rollback.** Firmware lives in `app0`/`app1` and a bad image is reverted by the
+bootloader; the filesystem partition is written in place. A broken page therefore
+stays broken until a new one is uploaded — which is what the recovery page is
+for. LittleFS is unmounted before the write, because overwriting the partition
+under a mounted filesystem means serving from blocks that no longer hold what it
+thinks they do.
+
 ## Updating over the air
 
 The USB flash happens once. After that the board can be updated over wifi, and
@@ -185,6 +212,23 @@ It therefore lands in terminal scrollback, in any CI log, and in `ps` while the
 upload runs. That is espota's behaviour, not something the firmware chooses.
 Treat the OTA password as visible to anyone who can read your terminal, and do
 not reuse a password from anywhere else for it.
+
+## Released binaries have OTA switched off
+
+The binaries attached to a GitHub release are built by the `release` workflow, in
+a checkout that has no `secrets.ini`. Since the OTA password is a compile-time
+flag, those images fall back to the empty default — and an empty password means
+`ota::enabled()` is false, so `/update` answers `503 OTA ist aus`.
+
+That is on purpose. The alternative was what happened to `v0.1.0`: a binary built
+on a laptop, published publicly, carrying that laptop's wifi SSID, wifi password,
+access point password and OTA password as plain strings. `strings` on the
+download was enough to read them. The asset was deleted and the passwords have to
+be treated as public.
+
+To get OTA back, write your own `secrets.ini` (`task setup`) and build. Making the
+OTA password settable at runtime — the way wifi credentials already are, in NVS —
+would remove the trade-off entirely.
 
 ## Doing it with task
 

@@ -247,9 +247,31 @@ tasks:
     cmds:
       - pio test -e native
 
-  verify:
-    desc: Build and test — what has to be green before a commit
+  lint:
+    desc: What CI lints — static analysis, gofmt, go vet, python syntax
+    silent: true
     cmds:
+      - |
+        set -e
+        gum log --level info "cppcheck on the firmware"
+        pio check -e piezo --skip-packages --json-output > .pio/check.json
+        python3 scripts/check-gate.py .pio/check.json --fail-on high medium
+        gum log --level info "gofmt and go vet on the sink"
+        cd tools/log-sink
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          gum log --level error "gofmt would rewrite: $unformatted"
+          exit 1
+        fi
+        go vet ./...
+        cd ../..
+        python3 -m compileall -q scripts
+        gum log --level info "clean"
+
+  verify:
+    desc: Lint, build and test — what has to be green before a commit
+    cmds:
+      - task: lint
       - task: build
       - task: test
       - task: sink:test
@@ -321,6 +343,10 @@ tasks:
         fi
         gum confirm "Write firmware over USB to {{.PORT}}? This overwrites what is on it." || exit 0
         pio run -e piezo -t upload
+        # The web UI lives in LittleFS, not in the firmware. Without this second
+        # step the board comes up serving only the recovery page.
+        gum log --level info "Now the web UI — a separate image from the firmware."
+        pio run -e piezo -t uploadfs
 
   monitor:
     desc: Serial monitor, 115200
@@ -365,6 +391,13 @@ tasks:
       - |
         gum log --level info "The first upload makes macOS ask whether python may accept connections — say yes."
         pio run -e piezo-ota -t upload --upload-port "{{.ESP_HOST}}"
+
+  ota:fs:
+    desc: Send the web UI over wifi — needed whenever data/index.html changed
+    silent: true
+    cmds:
+      - task: net:ensure
+      - pio run -e piezo-ota -t uploadfs --upload-port "{{.ESP_HOST}}"
 
   rollback:
     desc: Upload a deliberately broken build and watch the previous one come back

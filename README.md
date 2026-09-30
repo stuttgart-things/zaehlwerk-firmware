@@ -63,8 +63,9 @@ are looking at.
 
 | | |
 | --- | --- |
-| `task flash` | The first flash, over USB. Once — everything after that goes over the air |
+| `task flash` | The first flash, over USB. Writes **both** images — firmware and the web UI |
 | `task ota` | Send new firmware over wifi. Checks the board answers first |
+| `task ota:fs` | Send the web UI over wifi. Needed whenever `data/index.html` changed |
 | `task boot` | Reset the board and read the boot lines: which slot, which image state, which network |
 | `task monitor` | Serial monitor, 115200 |
 | `task board` | Ask a running board over HTTP what it is |
@@ -83,7 +84,8 @@ are looking at.
 
 | | |
 | --- | --- |
-| `task verify` | Build and test — what has to be green before a commit |
+| `task verify` | Lint, build and test — what has to be green before a commit |
+| `task lint` | Exactly what CI lints: cppcheck, gofmt, go vet, python syntax |
 | `task build` | Build `piezo` and `piezo-test` |
 | `task test` | The rule tests, on the laptop |
 | `task sink:test` | The sink's tests |
@@ -96,6 +98,31 @@ are looking at.
 | `task wifi:esp` | Join the access point the board carries when its network is not there. Its name holds the chip id |
 | `task wifi:back` | Rejoin the usual wifi |
 | `task docs:serve` | Preview the TechDocs the way Backstage renders them |
+
+## The web UI is a second image
+
+The page is `data/index.html` and it is flashed into LittleFS, not compiled into
+the firmware. So `pio run -t upload` alone leaves a board with no page — which is
+why `task flash` runs `uploadfs` as well, and why there are two over-the-air
+tasks rather than one.
+
+A board with no filesystem is not bricked. It answers `/` with **HTTP 503** and a
+recovery page that can upload either image itself, so the way back does not need
+a cable.
+
+## Continuous integration
+
+| Workflow | When | What |
+| -------- | ---- | ---- |
+| [`ci`](.github/workflows/ci.yml) | push to `main`, every pull request | cppcheck, gofmt, `go vet`, python syntax, YAML parses, the rule tests, both firmware builds and the filesystem image |
+| [`release`](.github/workflows/release.yml) | a `v*` tag | runs `ci` first, then attaches the artefacts **that run built** to the release |
+
+`task lint` runs the same lint locally.
+
+Released binaries are built in CI, where there is no `secrets.ini`. That keeps
+wifi and OTA passwords out of a public download — and means the attached images
+have OTA disabled, because the OTA password is a compile-time flag. Build your
+own to get it back.
 
 ## Shared protocol
 
