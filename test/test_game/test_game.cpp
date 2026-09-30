@@ -58,15 +58,34 @@ static void the_point_goes_to_the_side_of_the_second_to_last_bounce() {
 }
 
 static void a_single_bounce_is_a_botched_serve() {
+  // Awards again, as the sketch did — see game.cpp for why it was switched off
+  // and switched back on the same evening.
   game::Urteil u = game::rallyBewerten("A", 'A');
   TEST_ASSERT_EQUAL_CHAR('B', u.gewinner);
+  TEST_ASSERT_EQUAL_STRING("single_bounce", u.grund);
   TEST_ASSERT_TRUE(u.hinweis.find("Nur ein Aufsetzer") != std::string::npos);
 }
 
 static void two_bounces_from_the_serve_are_ambiguous() {
+  // An ace and a serve that clipped the net are the same two bounces from under
+  // the table, and they are not the same thing: one is a point, the other a let.
   game::Urteil u = game::rallyBewerten("AB", 'A');
   TEST_ASSERT_EQUAL_CHAR('A', u.gewinner);
+  TEST_ASSERT_EQUAL_STRING("serve_unclear", u.grund);
   TEST_ASSERT_TRUE(u.hinweis.find("Ass oder Netzaufschlag") != std::string::npos);
+}
+
+// The rules that still award, so the change above cannot quietly swallow them.
+static void a_longer_rally_still_awards() {
+  game::Urteil u = game::rallyBewerten("ABAB", 'A');
+  TEST_ASSERT_EQUAL_CHAR('A', u.gewinner);
+  TEST_ASSERT_EQUAL_STRING("last_bounce", u.grund);
+}
+
+static void a_double_bounce_still_awards() {
+  game::Urteil u = game::rallyBewerten("ABB", 'A');
+  TEST_ASSERT_EQUAL_CHAR('A', u.gewinner);
+  TEST_ASSERT_EQUAL_STRING("double_bounce", u.grund);
 }
 
 static void a_first_bounce_on_the_wrong_side_is_recorded() {
@@ -132,6 +151,8 @@ int main(int, char **) {
   RUN_TEST(the_point_goes_to_the_side_of_the_second_to_last_bounce);
   RUN_TEST(a_single_bounce_is_a_botched_serve);
   RUN_TEST(two_bounces_from_the_serve_are_ambiguous);
+  RUN_TEST(a_longer_rally_still_awards);
+  RUN_TEST(a_double_bounce_still_awards);
   RUN_TEST(a_first_bounce_on_the_wrong_side_is_recorded);
   RUN_TEST(an_empty_sequence_awards_nothing);
   RUN_TEST(the_reason_names_the_rule_that_decided);

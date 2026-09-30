@@ -8,6 +8,10 @@ body{background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system
 .wrap{max-width:520px;margin:0 auto}
 .board{background:#12171D;border-radius:10px;padding:22px 18px;text-align:center}
 .score{font:700 74px/1 ui-monospace,Menlo,monospace;color:#F5F7F9;letter-spacing:2px}
+.weg-bar{display:none;background:#B3261E;color:#fff;padding:10px 14px;border-radius:8px;
+margin-bottom:12px;font:700 13px inherit;text-align:center}
+body.weg .weg-bar{display:block}
+body.weg .board{opacity:.45}
 .mock{display:none;background:var(--orange);color:#fff;border-radius:8px;
 padding:10px 14px;margin-bottom:12px;font:700 13px inherit;letter-spacing:.04em;
 text-align:center}
@@ -15,12 +19,17 @@ text-align:center}
 .mock small{display:block;font-weight:400;letter-spacing:0;opacity:.9;margin-top:2px}
 .who{display:flex;justify-content:space-between;font:600 13px inherit;
 color:#9AA7B4;margin-bottom:4px;gap:12px}
-.who span{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who span{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color .15s}
+/* The serve belongs where the eye already is. It lived only in an 11px
+   caption under a 74px score, and a whole game went by without anybody
+   noticing it had changed. */
+.who span.srv{color:var(--orange);font-weight:800}
+.who span.srv::before{content:"\25CF";margin-right:5px;font-size:10px;vertical-align:1px}
 .ends{margin-top:12px}
 .rec{margin-top:8px;font:11px ui-monospace,monospace;letter-spacing:.05em}
 .rec.on{color:var(--teal)}
 .rec.off{color:#8A94A0}
-.serve{margin-top:10px;font-size:11px;letter-spacing:.16em;color:var(--orange);text-transform:uppercase}
+.serve{margin-top:10px;font-size:13px;font-weight:700;letter-spacing:.1em;color:var(--orange);text-transform:uppercase}
 .won{margin-top:8px;color:var(--teal);font-size:13px}
 .seq{display:flex;gap:5px;justify-content:center;margin-top:14px;min-height:26px;flex-wrap:wrap}
 .chip{width:24px;height:24px;border-radius:4px;display:grid;place-items:center;
@@ -61,7 +70,8 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 .ni{font:12px/1.7 ui-monospace,monospace;color:var(--muted)}
 .ni b{color:var(--ink)}
 .ni .warn{color:var(--orange)}
-</style></head><body><div class="wrap">
+</style></head><body>
+<div class="weg-bar">Keine Verbindung zum Zaehlwerk — angezeigte Werte sind alt</div><div class="wrap">
 
 <div class="mock" id="mb">MOCK &mdash; die Treffer sind erfunden
   <small>Kein Piezo, kein Ball. Sitzungen aus diesem Modus tragen
@@ -91,9 +101,12 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
     <div class="tag" data-v="other"       onclick="marke('other')">Sonstiges</div>
   </div>
   <input class="kom" id="kom" placeholder="Was ist passiert? (optional)" autocomplete="off">
-  <div class="msg" id="km" style="margin:-4px 0 8px">Marke und Text gelten fuer die
-    naechste Korrektur. Nur festhalten, ohne den Spielstand zu aendern:
-    <a href="#" onclick="notieren();return false">notieren</a>.</div>
+  <div class="row" style="margin-top:8px">
+    <button id="bnt" onclick="notieren()">Nur notieren</button>
+  </div>
+  <div class="msg" id="km" style="margin:8px 0">Marke und Text gehoeren zum Stand
+    <b id="kst">0:0</b> und gelten fuer die naechste Korrektur — oder fuer
+    <b>Nur notieren</b>, das den Spielstand nicht anfasst.</div>
   <div class="row">
     <button id="bpa" onclick="go('/punkt?s=A')">Punkt A</button>
     <button id="bpb" onclick="go('/punkt?s=B')">Punkt B</button>
@@ -128,6 +141,15 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   <input type="range" id="rb" min="50" max="2000" step="25" onchange="cfg()">
   <label>Ballwechsel-Timeout — <span class="val" id="lt">1500</span> ms</label>
   <input type="range" id="rt" min="500" max="4000" step="100" onchange="cfg()">
+
+  <div class="msg" style="margin-top:14px">Ab hier: was ins Protokoll wandert.
+  Tiefer heisst mehr Kurven im Sink, nicht mehr Punkte.</div>
+  <label>Log-Schwelle A — <span class="val" id="vla">120</span></label>
+  <input type="range" id="rla" min="20" max="1000" step="10" onchange="cfg()">
+  <label>Log-Schwelle B — <span class="val" id="vlb">120</span></label>
+  <input type="range" id="rlb" min="20" max="1000" step="10" onchange="cfg()">
+  <label>Trennschärfe — <span class="val" id="vcr">1800</span> ‰</label>
+  <input type="range" id="rcr" min="1000" max="3000" step="50" onchange="cfg()">
 </div>
 
 <div class="card"><h2>Protokoll</h2><div id="lg"></div></div>
@@ -239,23 +261,40 @@ function go(u){
   if(kom.value)q.set('note',kom.value);
   const s=q.toString();
   halt=Date.now()+400;
-  fetch(u + (s ? (u.includes('?')?'&':'?')+s : '')).then(()=>{
-    gewaehlt=''; kom.value='';
-    document.querySelectorAll('.tag').forEach(t=>t.classList.remove('on'));
-    tick();
-  });
+  fetch(u + (s ? (u.includes('?')?'&':'?')+s : ''))
+    .then(r=>r.json().catch(()=>null))
+    .then(d=>{
+      // Say what happened. Taking back a double award needs two presses, and
+      // the first one discarding the open rally used to look like nothing.
+      if(d && d.undone){
+        km.textContent =
+          d.undone==='rally+point' ? 'Ballwechsel verworfen und Punkt zurueckgenommen — Stand '+d.a+':'+d.b :
+          d.undone==='point'       ? 'Punkt zurueckgenommen — Stand '+d.a+':'+d.b :
+          d.undone==='rally'       ? 'Laufender Ballwechsel verworfen, kein Punkt zum Zuruecknehmen.' :
+                                     'Nichts mehr zurueckzunehmen.';
+      }
+      gewaehlt=''; kom.value='';
+      document.querySelectorAll('.tag').forEach(t=>t.classList.remove('on'));
+      tick();
+    }).catch(()=>{km.textContent='Ging nicht.';});
 }
 function cfg(){
   const a=ra.value,b=rb.value,t=rt.value;
+    const xa=rla.value,xb=rlb.value,cr=rcr.value;
   la.textContent=a;lb.textContent=b;lt.textContent=t;
+    vla.textContent=xa;vlb.textContent=xb;vcr.textContent=cr;
   halt=Date.now()+400;
-  fetch(`/cfg?a=${a}&b=${b}&t=${t}`).then(tick);
+  fetch(`/cfg?a=${a}&b=${b}&t=${t}&la=${xa}&lb=${xb}&cr=${cr}`).then(tick);
 }
+let stand = Date.now();
 function tick(){
   if(Date.now()<halt)return;
   fetch('/state').then(r=>r.json()).then(d=>{
     sc.textContent=d.a+':'+d.b;
+      kst.textContent=d.a+':'+d.b;
     wa.textContent=d.na; wb.textContent=d.nb;
+    wa.classList.toggle('srv', !d.over && d.serve=='A');
+    wb.classList.toggle('srv', !d.over && d.serve=='B');
     sv.textContent=d.over?'Spiel beendet':'Aufschlag '+(d.serve=='A'?d.na:d.nb);
     wn.textContent=d.over?('Sieger: '+(d.winner=='A'?d.na:d.nb)):'';
     bpa.textContent='Punkt '+d.na; bpb.textContent='Punkt '+d.nb;
@@ -284,9 +323,18 @@ function tick(){
       : '';
     if(document.activeElement.type!=='range'){
       ra.value=d.ta;rb.value=d.tb;rt.value=d.to;
+      rla.value=d.la;rlb.value=d.lb;rcr.value=d.cr;
+      vla.textContent=d.la;vlb.textContent=d.lb;vcr.textContent=d.cr;
       la.textContent=d.ta;lb.textContent=d.tb;lt.textContent=d.to;
     }
-  }).catch(()=>{});
+    stand = Date.now();
+    document.body.classList.remove('weg');
+  }).catch(()=>{
+    // A silent catch is how a whole game got played against a frozen
+    // scoreboard: the page kept showing the last state it had and said
+    // nothing. Three seconds without an answer and it says so.
+    if(Date.now()-stand > 3000) document.body.classList.add('weg');
+  });
 }
 setInterval(tick,400);tick();
 function diagZeigen(d){

@@ -42,12 +42,20 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
       break;
     }
 
+  // These two were stopped from awarding on 2026-09-30 and put back the same
+  // evening. The sketch this was ported from awarded them, and a game with them
+  // switched off was worse, not better: almost every rally ended with nobody
+  // getting the point and somebody reaching for the phone. The reason is still
+  // recorded, so the log says which rule decided and how confident it was.
   if (folge.length() == 1) {
     u.hinweis = "Nur ein Aufsetzer — Aufschlag ins Netz oder ins Aus.";
     u.grund   = "single_bounce";
   }
-  if (folge.length() == 2 && folge[0] == aufschlag && folge[1] == andere(aufschlag))
+  if (folge.length() == 2 && folge[0] == aufschlag && folge[1] == andere(aufschlag)) {
     u.hinweis = "Ass oder Netzaufschlag? Nicht unterscheidbar — bitte pruefen.";
+    u.grund   = "serve_unclear";
+  }
+
 
   return u;
 }

@@ -28,7 +28,10 @@ struct Urteil {
   std::string hinweis;  // empty when the sequence was unambiguous; German, shown in the UI
   // Which rule decided. A protocol token for the log, not prose: the hint says
   // what to tell a person, this says what to count.
-  const char *grund;    // "last_bounce" | "single_bounce" | "double_bounce" | "none"
+  const char *grund;    // "last_bounce" | "single_bounce" | "double_bounce" |
+                        // "serve_unclear" | "none"
+  // gewinner is ' ' when no point is awarded: the sequence was recorded but the
+  // table could not tell what happened. That is a verdict, not a failure.
 };
 
 // Reads a bounce sequence such as "ABAB": who gets the point, and what makes
