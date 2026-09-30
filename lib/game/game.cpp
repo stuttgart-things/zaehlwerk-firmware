@@ -42,12 +42,29 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
       break;
     }
 
+  // Two endings the table cannot tell apart. Measured on 2026-09-30: of sixteen
+  // points awarded automatically in one game, nine were taken back, and these two
+  // rules produced thirteen of them. So they stop awarding: the rally is recorded
+  // with its reason, and whoever is playing gives the point by hand.
+  //
+  // A single bounce is almost never a rally. It is the ball settling after the
+  // point was already decided — which is how one stroke scored twice: the timeout
+  // ended the rally while the ball was still bouncing, and the next bounce opened
+  // a new rally that scored on its own.
   if (folge.length() == 1) {
-    u.hinweis = "Nur ein Aufsetzer — Aufschlag ins Netz oder ins Aus.";
-    u.grund   = "single_bounce";
+    u.hinweis  = "Nur ein Aufsetzer — kein Punkt vergeben, bitte selbst geben.";
+    u.grund    = "single_bounce";
+    u.gewinner = ' ';
   }
-  if (folge.length() == 2 && folge[0] == aufschlag && folge[1] == andere(aufschlag))
-    u.hinweis = "Ass oder Netzaufschlag? Nicht unterscheidbar — bitte pruefen.";
+
+  // Serve on the server's half, then the receiver's, then silence. An ace and a
+  // serve that clipped the net look identical from underneath the table, and they
+  // are not the same thing — one is a point, the other a let.
+  if (folge.length() == 2 && folge[0] == aufschlag && folge[1] == andere(aufschlag)) {
+    u.hinweis  = "Ass oder Netzaufschlag? Nicht unterscheidbar — kein Punkt.";
+    u.grund    = "serve_unclear";
+    u.gewinner = ' ';
+  }
 
   return u;
 }

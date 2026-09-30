@@ -55,7 +55,7 @@ const char *AP_PASS   = ZW_AP_PASS;
 
 volatile int schwelleA   = 300;
 volatile int schwelleB   = 300;
-volatile int rallyTimeout = 1500;   // ms Stille = Ballwechsel vorbei
+volatile int rallyTimeout = 3000;   // ms Stille = Ballwechsel vorbei
 
 // Everything above log_threshold is written to the log, whether or not it
 // counts. Below the counting threshold on purpose: the crossings that were
@@ -78,6 +78,26 @@ QueueHandle_t queue;
 // lets anything outside see the task is really running. The rollback needs
 // both: with no sign of life from the sensor task, an image that boots but can
 // no longer measure would count as "started cleanly".
+// The bring-up measurement from issue #35, step 2. Quiet sampling costs a
+// vTaskDelay(1) per reading, so the channels are looked at every 1.3 ms while a
+// piezo transient is over in a few. Triggering needs an instantaneous sample
+// above the threshold, so the peak is caught only by luck — which is what the
+// finger taps showed: single samples of 65, 105, 110 from taps whose real peaks
+// were never measured, because no window opens below the threshold.
+//
+// With ZW_CONTINUOUS_SAMPLING the loop yields instead of sleeping and the task
+// moves to core 1, where nothing else runs. Core 1's idle task is not watched by
+// the watchdog in this build, so a tight loop there is survivable; on core 0 it
+// would starve wifi and lwIP.
+#ifndef ZW_SENSOR_CORE
+#define ZW_SENSOR_CORE 0
+#endif
+#if ZW_CONTINUOUS_SAMPLING
+  #define ZW_SENSOR_YIELD() taskYIELD()
+#else
+  #define ZW_SENSOR_YIELD() vTaskDelay(1)
+#endif
+
 TaskHandle_t sensorTaskHandle = nullptr;
 volatile uint32_t sensorTicks = 0;
 
@@ -139,7 +159,7 @@ void sensorTask(void *) {
       // drag them along.
       baselineA += (a - baselineA) / 64;
       baselineB += (b - baselineB) / 64;
-      vTaskDelay(1);
+      ZW_SENSOR_YIELD();
       continue;
     }
 
@@ -171,7 +191,7 @@ void sensorTask(void *) {
       h.preUs = 0;
       h.sampleCount = 0;
       diag::hit(h);
-      vTaskDelay(1);
+      ZW_SENSOR_YIELD();
       continue;
     }
 
@@ -239,7 +259,7 @@ void sensorTask(void *) {
       xQueueSend(queue, &t, 0);
       sperreBis = millis() + SPERRE_MS;
     }
-    vTaskDelay(1);
+    ZW_SENSOR_YIELD();
   }
 }
 
@@ -314,6 +334,34 @@ void sichern() {
   verlauf[verlaufN++] = { punkteA, punkteB, ersterAufschlag, aufschlag, vorbei, sieger, logAnzahl };
 }
 
+// The thresholds are what the bring-up is for, and they were lost on every
+// restart: /cfg only moved the variable and logged the change, and the second
+// argument was a label for that log, not a key. Anyone who set them at the table
+// found 300 again after the next flash.
+const char *const CFG_NS = "zwcfg";
+
+void cfgLaden() {
+  Preferences p;
+  if (!p.begin(CFG_NS, true)) return;
+  auto lies = [&p](const char *key, volatile int &ziel) {
+    if (p.isKey(key)) ziel = p.getInt(key, ziel);
+  };
+  lies("thr_a",  schwelleA);
+  lies("thr_b",  schwelleB);
+  lies("to",     rallyTimeout);
+  lies("log_a",  logSchwelleA);
+  lies("log_b",  logSchwelleB);
+  lies("ratio",  clearRatioPromille);
+  p.end();
+}
+
+void cfgSichern(const char *key, int wert) {
+  Preferences p;
+  if (!p.begin(CFG_NS, false)) return;
+  p.putInt(key, wert);
+  p.end();
+}
+
 void logEintragen(String folge, String urteil, String hinweis) {
   if (logAnzahl >= 8) {
     for (int i = 1; i < 8; i++) log_[i-1] = log_[i];
@@ -350,6 +398,14 @@ void rallyBeenden() {
   rallyOffen = false;
 
   game::Urteil u = game::rallyBewerten(std::string(folge.c_str()), aufschlag);
+  if (u.gewinner != 'A' && u.gewinner != 'B') {
+    // No point, on purpose. It still belongs in both logs: the one on the phone,
+    // so nobody wonders why the score did not move, and the diagnostic one, so
+    // the rally can be counted later against what actually happened.
+    logEintragen(folge, "Kein Punkt", String(u.hinweis.c_str()));
+    diag::mark(String(u.grund), String(u.hinweis.c_str()), rallyId);
+    return;
+  }
   punktGeben(u.gewinner, folge, String(u.hinweis.c_str()), u.grund);
 }
 
@@ -361,14 +417,20 @@ void rallyBeenden() {
 // read as a button that did nothing, which is exactly how it felt while a
 // simulation was running. So an unfinished rally is discarded first and the
 // point behind it is taken back after.
-void zurueck(const String &marke = "", const String &kommentar = "") {
+// Returns what it did, because a button that silently does the right thing reads
+// as a button that does nothing — which is how taking back a double award felt:
+// the first press discarded the rally and popped the point in one go, and showed
+// neither.
+const char *zurueck(const String &marke = "", const String &kommentar = "") {
+  bool ballwechselVerworfen = false;
   if (rally.length() > 0) {
     if (verlaufN > 0) verlaufN--;
     diag::rallyEnd(rallyId, rally, "discarded");
     rally = "";
     rallyOffen = false;
+    ballwechselVerworfen = true;
   }
-  if (verlaufN == 0) return;
+  if (verlaufN == 0) return ballwechselVerworfen ? "rally" : "nothing";
   const int vorA = punkteA, vorB = punkteB;
   const char vorAufschlag = aufschlag;
   Snapshot s = verlauf[--verlaufN];
@@ -379,6 +441,7 @@ void zurueck(const String &marke = "", const String &kommentar = "") {
   diag::point(++pointId, rallyId, "undo", "", ' ',
               vorA, vorB, vorAufschlag, punkteA, punkteB, aufschlag, vorbei,
               marke, kommentar, "", "");
+  return ballwechselVerworfen ? "rally+point" : "point";
 }
 
 void neuesSpiel() {
@@ -619,6 +682,9 @@ void setup() {
   Serial.printf("\nZaehlwerk %s  git %s  built %s\n%s\n",
                 ZW_FW_VERSION, ZW_GIT_HASH, ZW_BUILD_DATE, ZW_GIT_REPO);
 
+  // Before anything reads them: what was set at the table outlives the reboot.
+  cfgLaden();
+
   // The page comes from here. A board without it still answers, with a page
   // that can put one back — see NOTFALL above.
   if (!LittleFS.begin(false)) {
@@ -637,7 +703,8 @@ void setup() {
 #endif
 
   queue = xQueueCreate(16, sizeof(Treffer));
-  xTaskCreatePinnedToCore(sensorTask, "sensor", 4096, NULL, 3, &sensorTaskHandle, 0);
+  xTaskCreatePinnedToCore(sensorTask, "sensor", 8192, NULL, 3, &sensorTaskHandle,
+                          ZW_SENSOR_CORE);
 
   // Station on the configured network, our own access point if that does not
   // come up in time. Blocks for up to the timeout — deliberately, see net.cpp.
@@ -669,24 +736,28 @@ void setup() {
   });
   server.on("/zurueck", []{
     pausieren();
-    zurueck(server.arg("tag"), server.arg("note"));
-    server.send(200, "text/plain", "ok");
+    const char *was = zurueck(server.arg("tag"), server.arg("note"));
+    server.send(200, "application/json",
+                String("{\"undone\":\"") + was + "\",\"a\":" + punkteA +
+                ",\"b\":" + punkteB + "}");
   });
   server.on("/neu",     []{ neuesSpiel(); server.send(200, "text/plain", "ok"); });
   server.on("/cfg", []{
-    auto setzen = [](const char *arg, const char *name, volatile int &ziel) {
+    auto setzen = [](const char *arg, const char *name, const char *key,
+                     volatile int &ziel) {
       if (!server.hasArg(arg)) return;
       const int neu = server.arg(arg).toInt();
       if (neu == ziel) return;
       diag::param(name, String(ziel), String(neu), "web");
       ziel = neu;
+      cfgSichern(key, neu);
     };
-    setzen("a",  "threshold_a",      schwelleA);
-    setzen("b",  "threshold_b",      schwelleB);
-    setzen("t",  "rally_timeout_ms", rallyTimeout);
-    setzen("la", "log_threshold_a",  logSchwelleA);
-    setzen("lb", "log_threshold_b",  logSchwelleB);
-    setzen("cr", "clear_ratio",      clearRatioPromille);
+    setzen("a",  "threshold_a",      "thr_a", schwelleA);
+    setzen("b",  "threshold_b",      "thr_b", schwelleB);
+    setzen("t",  "rally_timeout_ms", "to",    rallyTimeout);
+    setzen("la", "log_threshold_a",  "log_a", logSchwelleA);
+    setzen("lb", "log_threshold_b",  "log_b", logSchwelleB);
+    setzen("cr", "clear_ratio",      "ratio", clearRatioPromille);
     server.send(200, "text/plain", "ok");
   });
 

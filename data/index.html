@@ -91,9 +91,12 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
     <div class="tag" data-v="other"       onclick="marke('other')">Sonstiges</div>
   </div>
   <input class="kom" id="kom" placeholder="Was ist passiert? (optional)" autocomplete="off">
-  <div class="msg" id="km" style="margin:-4px 0 8px">Marke und Text gelten fuer die
-    naechste Korrektur. Nur festhalten, ohne den Spielstand zu aendern:
-    <a href="#" onclick="notieren();return false">notieren</a>.</div>
+  <div class="row" style="margin-top:8px">
+    <button id="bnt" onclick="notieren()">Nur notieren</button>
+  </div>
+  <div class="msg" id="km" style="margin:8px 0">Marke und Text gehoeren zum Stand
+    <b id="kst">0:0</b> und gelten fuer die naechste Korrektur — oder fuer
+    <b>Nur notieren</b>, das den Spielstand nicht anfasst.</div>
   <div class="row">
     <button id="bpa" onclick="go('/punkt?s=A')">Punkt A</button>
     <button id="bpb" onclick="go('/punkt?s=B')">Punkt B</button>
@@ -248,11 +251,22 @@ function go(u){
   if(kom.value)q.set('note',kom.value);
   const s=q.toString();
   halt=Date.now()+400;
-  fetch(u + (s ? (u.includes('?')?'&':'?')+s : '')).then(()=>{
-    gewaehlt=''; kom.value='';
-    document.querySelectorAll('.tag').forEach(t=>t.classList.remove('on'));
-    tick();
-  });
+  fetch(u + (s ? (u.includes('?')?'&':'?')+s : ''))
+    .then(r=>r.json().catch(()=>null))
+    .then(d=>{
+      // Say what happened. Taking back a double award needs two presses, and
+      // the first one discarding the open rally used to look like nothing.
+      if(d && d.undone){
+        km.textContent =
+          d.undone==='rally+point' ? 'Ballwechsel verworfen und Punkt zurueckgenommen — Stand '+d.a+':'+d.b :
+          d.undone==='point'       ? 'Punkt zurueckgenommen — Stand '+d.a+':'+d.b :
+          d.undone==='rally'       ? 'Laufender Ballwechsel verworfen, kein Punkt zum Zuruecknehmen.' :
+                                     'Nichts mehr zurueckzunehmen.';
+      }
+      gewaehlt=''; kom.value='';
+      document.querySelectorAll('.tag').forEach(t=>t.classList.remove('on'));
+      tick();
+    }).catch(()=>{km.textContent='Ging nicht.';});
 }
 function cfg(){
   const a=ra.value,b=rb.value,t=rt.value;
@@ -266,6 +280,7 @@ function tick(){
   if(Date.now()<halt)return;
   fetch('/state').then(r=>r.json()).then(d=>{
     sc.textContent=d.a+':'+d.b;
+      kst.textContent=d.a+':'+d.b;
     wa.textContent=d.na; wb.textContent=d.nb;
     sv.textContent=d.over?'Spiel beendet':'Aufschlag '+(d.serve=='A'?d.na:d.nb);
     wn.textContent=d.over?('Sieger: '+(d.winner=='A'?d.na:d.nb)):'';
