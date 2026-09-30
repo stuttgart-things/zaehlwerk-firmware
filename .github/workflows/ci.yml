@@ -50,7 +50,7 @@ jobs:
       - name: yaml parses
         run: |
           pip install --quiet pyyaml
-          python -c "import yaml,sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]" Taskfile.yaml .github/workflows/ci.yml .github/workflows/release.yml docs/mkdocs.yml catalog-info.yaml
+          python -c "import yaml,sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]" Taskfile.yaml .github/workflows/ci.yml .github/workflows/release.yml mkdocs.yml catalog-info.yaml
 
       - name: no secrets committed
         run: |
@@ -88,10 +88,29 @@ jobs:
 
       - name: static analysis
         run: |
+          # Install first, separately: anything PlatformIO prints while fetching a
+          # package would otherwise land in the redirected JSON, or — as happened
+          # on the first run — the JSON never gets written at all and the step
+          # fails on an empty file with nothing to read.
+          pio pkg install -e piezo
+          # cppcheck explicitly: --skip-packages keeps the check scoped to our own
+          # sources, and on a fresh runner that left the tool uninstalled, so the
+          # check silently did nothing and wrote no JSON.
+          pio pkg install -g --tool platformio/tool-cppcheck
+
+          # Once for a human to read in the log.
+          pio check -e piezo --skip-packages
+
+          # And once for the gate. Cached, so its stdout is only JSON.
+          pio check -e piezo --skip-packages --json-output > check.json
+          if [ ! -s check.json ]; then
+            echo "::error::pio check wrote no JSON — see the readable run above"
+            exit 1
+          fi
+
           # The gate is scripts/check-gate.py, not --fail-on-defect: that flag
           # reports HIGH 1 and exits 0 once check_flags is set, which was found
           # by injecting a null pointer dereference and watching it pass.
-          pio check -e piezo --skip-packages --json-output > check.json
           python scripts/check-gate.py check.json --fail-on high medium
 
       - name: rule tests
