@@ -26,28 +26,76 @@ One PlatformIO project. Two of the planned environments are written:
 Per-unit configuration — source id, hub MAC, wifi, API URL — is set by build
 flag, not by editing source.
 
-## Getting it onto a board
+## Tooling
 
-Everything below is driven by `task`, which wraps `pio` with the checks that
-otherwise get forgotten — is a board plugged in, is a monitor holding the port,
-is the laptop even on the right wifi.
+Three things, and what each is for:
+
+| | |
+| --- | --- |
+| [**Task**](https://taskfile.dev) | Every command anybody types is a task. `Taskfile.yaml` wraps `pio` with the checks that otherwise get forgotten — is a board plugged in, is a monitor holding the serial port, is the laptop even on the same network as the board |
+| [**gum**](https://github.com/charmbracelet/gum) | The asking. Passwords are prompted without echo, a flash that overwrites asks first, and a status line reads as a status line |
+| [**VS Code**](https://code.visualstudio.com) + [**PlatformIO IDE**](https://platformio.org/install/ide?install=vscode) | How it is built and flashed. The Arduino IDE is out of the loop; `sketches/` stays only as the record of the bench measurement |
 
 ```bash
-task            # what to type, in order
-task setup      # create secrets.ini: wifi and OTA passwords
-task status     # where everything stands right now
-task check      # tools, board, network, passwords
-task flash      # once, over USB
-task boot       # reset and read the boot lines
-task ota        # everything after that, over wifi
-task board      # which network, address and channel it is on
-task sink       # receive the diagnostic log, viewer on :9001
-task rollback   # prove a bad build gets put back
+brew install go-task charmbracelet/tap/gum
 ```
 
-`pio` works on its own just as well; the full walkthrough, including the VS Code
-extension and what the rollback test looks like, is in
-[docs/flashing-and-ota.md](docs/flashing-and-ota.md).
+`pio` works on its own just as well — every task says which `pio` command it
+runs. The full walkthrough, including the VS Code extension and the rollback
+test, is in [docs/flashing-and-ota.md](docs/flashing-and-ota.md).
+
+## The tasks
+
+`task` on its own prints the short path from nothing to a running board.
+`task --list` prints all of them.
+
+### Before touching anything
+
+| | |
+| --- | --- |
+| `task status` | Where everything stands: board, wifi and channel, laptop, sink, play. The question after a break, a move to another room, or a reflash |
+| `task check` | Whether anything is **in the way**: tools, board, serial port, passwords, network, a dirty tree |
+
+Different questions. `check` asks whether you can start; `status` says what you
+are looking at.
+
+### Onto the board
+
+| | |
+| --- | --- |
+| `task flash` | The first flash, over USB. Once — everything after that goes over the air |
+| `task ota` | Send new firmware over wifi. Checks the board answers first |
+| `task boot` | Reset the board and read the boot lines: which slot, which image state, which network |
+| `task monitor` | Serial monitor, 115200 |
+| `task board` | Ask a running board over HTTP what it is |
+| `task rollback` | Upload a deliberately broken build and watch the previous one come back |
+
+### The diagnostic log
+
+| | |
+| --- | --- |
+| `task sink` | Receive the log, write a day folder with one JSON per game, serve the viewer on `:9001` |
+| `task sink:games` | Split a session into one JSON per game. `SESSION=…/sessions/<file>.jsonl` |
+| `task sink:export` | Zip one session with a summary beside it |
+| `task sink:mock` | Send a made-up session at the sink — no board needed |
+
+### Building and testing
+
+| | |
+| --- | --- |
+| `task verify` | Build and test — what has to be green before a commit |
+| `task build` | Build `piezo` and `piezo-test` |
+| `task test` | The rule tests, on the laptop |
+| `task sink:test` | The sink's tests |
+
+### Setup and one-offs
+
+| | |
+| --- | --- |
+| `task setup` | Write `secrets.ini`: wifi and OTA passwords, prompted rather than echoed, never in the repository |
+| `task wifi:esp` | Join the access point the board carries when its network is not there. Its name holds the chip id |
+| `task wifi:back` | Rejoin the usual wifi |
+| `task docs:serve` | Preview the TechDocs the way Backstage renders them |
 
 ## Shared protocol
 
