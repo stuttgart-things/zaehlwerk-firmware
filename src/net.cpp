@@ -20,7 +20,7 @@ String ssid_;
 String hostname_;
 uint32_t timeout_ = 15000;
 
-void log(const String &msg) { Serial.printf("[net] %s\n", msg.c_str()); }
+void sagen(const String &msg) { Serial.printf("[net] %s\n", msg.c_str()); }
 
 // The chip id in the access point name is what tells two boards in one room
 // apart. The last three octets of the station MAC, so it matches the address
@@ -44,7 +44,7 @@ void openAccessPoint(const Config &cfg) {
   ssid_ = apName(cfg.apPrefix);
   WiFi.softAP(ssid_.c_str(), cfg.apPassword);
   mode_ = Mode::AccessPoint;
-  log("own access point \"" + ssid_ + "\" on " + WiFi.softAPIP().toString() +
+  sagen("own access point \"" + ssid_ + "\" on " + WiFi.softAPIP().toString() +
       ", channel " + String(WiFi.channel()));
 }
 
@@ -79,10 +79,10 @@ void begin(const Config &cfg) {
   WiFi.setAutoReconnect(true);
 
   if (ssid.isEmpty()) {
-    log("no network configured, going straight to the access point");
+    sagen("no network configured, going straight to the access point");
     openAccessPoint(cfg);
   } else {
-    log("joining \"" + ssid + "\"" + (fromSeed ? " (from secrets.ini)" : "") +
+    sagen("joining \"" + ssid + "\"" + (fromSeed ? " (from secrets.ini)" : "") +
         ", up to " + String(timeout_ / 1000) + "s");
     WiFi.begin(ssid.c_str(), pass.c_str());
 
@@ -92,10 +92,10 @@ void begin(const Config &cfg) {
     if (WiFi.waitForConnectResult(timeout_) == WL_CONNECTED) {
       mode_ = Mode::Station;
       ssid_ = ssid;
-      log("joined, address " + WiFi.localIP().toString() + ", channel " +
+      sagen("joined, address " + WiFi.localIP().toString() + ", channel " +
           String(WiFi.channel()));
     } else {
-      log("\"" + ssid + "\" did not come up within the timeout");
+      sagen("\"" + ssid + "\" did not come up within the timeout");
       openAccessPoint(cfg);
     }
   }
@@ -106,9 +106,9 @@ void begin(const Config &cfg) {
   // same hostname, which is harmless.
   if (MDNS.begin(hostname_.c_str())) {
     MDNS.addService("http", "tcp", 80);
-    log("mDNS: " + hostname_ + ".local");
+    sagen("mDNS: " + hostname_ + ".local");
   } else {
-    log("mDNS did not start");
+    sagen("mDNS did not start");
   }
 }
 
@@ -136,7 +136,7 @@ void setCredentials(const String &ssid, const String &password) {
   prefs.putString(KEY_SSID, ssid);
   prefs.putString(KEY_PASS, password);
   prefs.end();
-  log("credentials for \"" + ssid + "\" stored, active on the next start");
+  sagen("credentials for \"" + ssid + "\" stored, active on the next start");
 }
 
 void setStaTimeout(uint32_t ms) {

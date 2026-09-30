@@ -23,3 +23,7 @@ compile_commands.json
 
 # macOS
 .DS_Store
+
+# compileall, from the lint step
+__pycache__/
+*.pyc

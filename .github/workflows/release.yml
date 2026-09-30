@@ -1,0 +1,111 @@
+# A tag publishes a release. The checks run first, in the same run, and the
+# binaries that get attached are the ones those checks built — not a rebuild
+# and not anything from a laptop.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: the artefacts the checks built
+        uses: actions/download-artifact@v4
+        with:
+          name: piezo-build
+          path: build
+
+      - name: name them after the tag
+        id: assets
+        run: |
+          set -e
+          tag="${GITHUB_REF_NAME}"
+          mkdir -p out
+          cp build/firmware.bin "out/firmware-${tag}-piezo.bin"
+          cp build/littlefs.bin "out/littlefs-${tag}-piezo.bin"
+          cd out
+          sha256sum ./*.bin > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.assets.outputs.tag }}"
+          # gh rejects --notes-file together with --generate-notes, so fetch the
+          # generated part and put it on top ourselves.
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$tag" -q .body > generated.md || : > generated.md
+          cat > notes.md <<EOF
+          ## Flashing
+
+          First time, over USB — both images, because the web UI is a separate
+          partition from the firmware:
+
+          \`\`\`bash
+          pio run -e piezo -t upload     # firmware
+          pio run -e piezo -t uploadfs   # the web UI
+          \`\`\`
+
+          Or \`task flash\`, which does both.
+
+          On a board that is already running, over the air: **Firmware einspielen**
+          in the web UI, or \`task ota\` and \`task ota:fs\`.
+
+          ## Over-the-air is off in these binaries
+
+          The OTA password is a compile-time flag, and these were built in CI where
+          there is no \`secrets.ini\`. So the attached images carry no wifi
+          credentials — and cannot accept an over-the-air update either. Write your
+          own \`secrets.ini\` (\`task setup\`) and build, and OTA works.
+
+          That is deliberate: a published binary built on a laptop would contain
+          that laptop's wifi and OTA passwords in plaintext.
+
+          ## Files
+
+          | File | What |
+          | ---- | ---- |
+          | \`firmware-${tag}-piezo.bin\` | The firmware. Detection, scoring, web server, diagnostic log |
+          | \`littlefs-${tag}-piezo.bin\` | The web UI as a filesystem image |
+          | \`SHA256SUMS.txt\` | Checksums |
+          EOF
+          if [ -s generated.md ]; then
+            printf '\n---\n\n' >> notes.md
+            cat generated.md >> notes.md
+          fi
+          cat notes.md
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          tag="${{ steps.assets.outputs.tag }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # The tag was already released — add to it rather than fail, and
+            # replace same-named assets so a re-run is not an error.
+            gh release upload "$tag" out/* --clobber
+          else
+            gh release create "$tag" out/* \
+              --verify-tag \
+              --title "$tag" \
+              --notes-file notes.md
+          fi
+          gh release view "$tag" --json assets -q '.assets[] | "\(.name)  \(.size) bytes"'

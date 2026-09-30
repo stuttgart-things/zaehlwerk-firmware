@@ -34,6 +34,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <LittleFS.h>
 #include <Preferences.h>
 
 #include <string>
@@ -432,450 +433,55 @@ void namenSetzen(const String &a, const String &b) {
 WebServer server(80);
 bool webserverLaeuft = false;
 
-const char SEITE[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="de"><head>
+// The page lives in data/index.html and is uploaded to LittleFS separately from
+// the firmware. That is what makes it updatable on its own — and what makes the
+// fallback below necessary: `pio run -t upload` writes the app and not the
+// filesystem, so a board flashed without one would have no page at all and no
+// way back in except a cable.
+const char NOTFALL[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="de"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Zählwerk</title><style>
-:root{--ink:#1B2430;--slate:#2E3B49;--bg:#EEF1F4;--card:#fff;--line:#C4CDD6;
---muted:#5C6B7A;--orange:#FF6B2C;--teal:#7DD3C4}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,sans-serif;padding:16px}
-.wrap{max-width:520px;margin:0 auto}
-.board{background:#12171D;border-radius:10px;padding:22px 18px;text-align:center}
-.score{font:700 74px/1 ui-monospace,Menlo,monospace;color:#F5F7F9;letter-spacing:2px}
-.mock{display:none;background:var(--orange);color:#fff;border-radius:8px;
-padding:10px 14px;margin-bottom:12px;font:700 13px inherit;letter-spacing:.04em;
-text-align:center}
-.mock.on{display:block}
-.mock small{display:block;font-weight:400;letter-spacing:0;opacity:.9;margin-top:2px}
-.who{display:flex;justify-content:space-between;font:600 13px inherit;
-color:#9AA7B4;margin-bottom:4px;gap:12px}
-.who span{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ends{margin-top:12px}
-.rec{margin-top:8px;font:11px ui-monospace,monospace;letter-spacing:.05em}
-.rec.on{color:var(--teal)}
-.rec.off{color:#8A94A0}
-.serve{margin-top:10px;font-size:11px;letter-spacing:.16em;color:var(--orange);text-transform:uppercase}
-.won{margin-top:8px;color:var(--teal);font-size:13px}
-.seq{display:flex;gap:5px;justify-content:center;margin-top:14px;min-height:26px;flex-wrap:wrap}
-.chip{width:24px;height:24px;border-radius:4px;display:grid;place-items:center;
-font:700 12px ui-monospace,monospace;background:#2E3B49;color:#F5F7F9}
-.chip.b{background:var(--teal);color:#12403A}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:14px}
-h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
-.row{display:flex;gap:8px}
-button{flex:1;border:1px solid var(--line);background:#fff;border-radius:6px;padding:13px 6px;
-font:600 14px inherit;color:var(--ink);cursor:pointer}
-button:active{background:#E7ECF0}
-button.warn{border-color:var(--orange);color:#B8541F}
-label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
-input[type=range]{width:100%}
-.val{font:600 12px ui-monospace,monospace;color:var(--ink)}
-.entry{border-left:2px solid var(--line);padding:4px 0 4px 10px;margin-bottom:10px;font-size:13px}
-.entry.w{border-left-color:var(--orange)}
-.entry .f{font:700 12px ui-monospace,monospace;color:var(--muted)}
-.entry .h{font-size:11.5px;color:#B8541F;margin-top:2px}
-.foot{margin-top:14px;text-align:center;font:11px ui-monospace,monospace;color:var(--muted)}
-.foot.dirty{color:var(--orange)}
-.probe{margin-top:6px;font-size:11px;color:var(--orange)}
-.up{display:flex;flex-direction:column;gap:8px}
-.up input[type=file],.up input[type=password],.up select{width:100%;padding:9px;
-border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff}
-.bar{height:6px;border-radius:3px;background:#E7ECF0;overflow:hidden;display:none}
-.bar>i{display:block;height:100%;width:0;background:var(--orange)}
-.msg{font-size:12px;color:var(--muted);min-height:16px}
-.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-.tag{padding:5px 11px;border:1px solid var(--line);border-radius:14px;
-font-size:12px;background:#fff;cursor:pointer;user-select:none;color:var(--muted)}
-.tag.on{background:var(--orange);border-color:var(--orange);color:#fff}
-.kom{width:100%;padding:9px;border:1px solid var(--line);border-radius:6px;
-font:13px inherit;background:#fff;margin-bottom:8px}
-.net{display:flex;flex-direction:column;gap:8px}
-.net input[type=text],.net input[type=password]{width:100%;padding:9px;
-border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff}
-.ni{font:12px/1.7 ui-monospace,monospace;color:var(--muted)}
-.ni b{color:var(--ink)}
-.ni .warn{color:var(--orange)}
-</style></head><body><div class="wrap">
-
-<div class="mock" id="mb">MOCK &mdash; die Treffer sind erfunden
-  <small>Kein Piezo, kein Ball. Sitzungen aus diesem Modus tragen
-  <code>sensor: mock</code>.</small></div>
-
-<div class="board">
-  <div class="who"><span id="wa">A</span><span id="wb">B</span></div>
-  <div class="score" id="sc">0:0</div>
-  <div class="serve" id="sv">Aufschlag A</div>
-  <div class="rec off" id="rc">&#9675; wird nicht aufgezeichnet</div>
-  <div class="won" id="wn"></div>
-  <div class="seq" id="sq"></div>
+<title>Zählwerk — Dateisystem fehlt</title><style>
+body{background:#EEF1F4;color:#1B2430;font:15px/1.6 system-ui,sans-serif;padding:20px}
+.w{max-width:520px;margin:0 auto}
+.c{background:#fff;border:1px solid #C4CDD6;border-radius:10px;padding:16px;margin-top:14px}
+h1{font-size:17px;margin-bottom:6px}
+code{font:12px ui-monospace,monospace;background:#EEF1F4;padding:1px 5px;border-radius:4px}
+input,button{width:100%;padding:9px;margin-top:8px;border:1px solid #C4CDD6;
+border-radius:6px;font:14px inherit;background:#fff}
+button{font-weight:600;cursor:pointer}
+.m{font-size:12px;color:#5C6B7A;min-height:16px;margin-top:8px}
+</style></head><body><div class="w">
+<h1>Die Seite fehlt</h1>
+<p>Die Firmware laeuft, aber <code>/index.html</code> liegt nicht im Dateisystem.
+Das passiert nach einem <code>upload</code> ohne <code>uploadfs</code>.</p>
+<div class="c">
+  <p>Von hier aus einspielen, ohne Kabel:</p>
+  <select id="t">
+    <option value="/updatefs">Dateisystem (littlefs.bin)</option>
+    <option value="/update">Firmware (firmware.bin)</option>
+  </select>
+  <input type="file" id="f" accept=".bin">
+  <input type="password" id="p" placeholder="OTA-Passwort" autocomplete="off">
+  <button onclick="s()">Einspielen</button>
+  <div class="m" id="m"></div>
 </div>
-
-<div class="card"><h2>Korrektur</h2>
-  <div class="row" id="tr" style="display:none;margin-bottom:10px">
-    <button id="tb" onclick="transport()">Pause</button>
-  </div>
-  <div class="tags">
-    <div class="tag" data-v="missed"      onclick="marke('missed')">nicht erkannt</div>
-    <div class="tag" data-v="wrong_side"  onclick="marke('wrong_side')">falsche Seite</div>
-    <div class="tag" data-v="ghost"       onclick="marke('ghost')">Geistertreffer</div>
-    <div class="tag" data-v="net"         onclick="marke('net')">Netz</div>
-    <div class="tag" data-v="edge"        onclick="marke('edge')">Kante</div>
-    <div class="tag" data-v="bat_or_body" onclick="marke('bat_or_body')">Schlaeger/Koerper</div>
-    <div class="tag" data-v="let"         onclick="marke('let')">Let</div>
-    <div class="tag" data-v="other"       onclick="marke('other')">Sonstiges</div>
-  </div>
-  <input class="kom" id="kom" placeholder="Was ist passiert? (optional)" autocomplete="off">
-  <div class="msg" id="km" style="margin:-4px 0 8px">Marke und Text gelten fuer die
-    naechste Korrektur. Nur festhalten, ohne den Spielstand zu aendern:
-    <a href="#" onclick="notieren();return false">notieren</a>.</div>
-  <div class="row">
-    <button id="bpa" onclick="go('/punkt?s=A')">Punkt A</button>
-    <button id="bpb" onclick="go('/punkt?s=B')">Punkt B</button>
-  </div>
-  <div class="row" style="margin-top:8px">
-    <button class="warn" onclick="go('/zurueck')">Letzten zurück</button>
-    <button onclick="go('/neu')">Neues Spiel</button>
-  </div>
-  <div class="row ends">
-    <button class="warn" onclick="seiten()">Seiten wechseln</button>
-  </div>
-  <div class="msg" id="sm">Seiten nach jedem Satz. Wird das vergessen, wandern
-    alle weiteren Punkte auf die falsche Person.</div>
-</div>
-
-<div class="card"><h2>Spieler</h2>
-  <div class="net">
-    <label style="margin:0">Haelfte A</label>
-    <input type="text" id="pa" autocomplete="off" placeholder="Name, im Doppel beide">
-    <label style="margin:0">Haelfte B</label>
-    <input type="text" id="pb" autocomplete="off" placeholder="Name, im Doppel beide">
-    <div class="tags" id="zuletzt"></div>
-    <button onclick="spielerSpeichern()">Namen uebernehmen</button>
-    <div class="msg" id="pm">Ohne Namen bleibt alles bei A und B.</div>
-  </div>
-</div>
-
-<div class="card"><h2>Einstellungen</h2>
-  <label>Schwelle Hälfte A — <span class="val" id="la">300</span></label>
-  <input type="range" id="ra" min="50" max="2000" step="25" onchange="cfg()">
-  <label>Schwelle Hälfte B — <span class="val" id="lb">300</span></label>
-  <input type="range" id="rb" min="50" max="2000" step="25" onchange="cfg()">
-  <label>Ballwechsel-Timeout — <span class="val" id="lt">1500</span> ms</label>
-  <input type="range" id="rt" min="500" max="4000" step="100" onchange="cfg()">
-</div>
-
-<div class="card"><h2>Protokoll</h2><div id="lg"></div></div>
-
-<div class="card"><h2>Mock</h2>
-  <div class="row">
-    <button id="mq" onclick="quelle()">Auf Mock umschalten</button>
-  </div>
-  <div class="msg" id="mm">Umschalten beendet die laufende Sitzung und beginnt eine neue.</div>
-  <div id="mt" style="display:none">
-    <div class="row" style="margin-top:4px">
-      <button onclick="mtrig('hit','A')">Treffer A</button>
-      <button onclick="mtrig('hit','B')">Treffer B</button>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button onclick="mtrig('weak','A')">schwach A</button>
-      <button onclick="mtrig('weak','B')">schwach B</button>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button onclick="mtrig('ghost','A')">Geistertreffer</button>
-      <button onclick="mtrig('net','A')">Netzball</button>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button onclick="mtrig('rally','A')">Rallye abspielen</button>
-      <button id="ma" class="warn" onclick="sim('auto')">Autoplay an</button>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button id="mg" onclick="sim('game')">Ein Spiel</button>
-      <button id="mmm" onclick="sim('match')">Ein Match (best of 5)</button>
-    </div>
-    <div class="msg" id="ms2"></div>
-  </div>
-</div>
-
-<div class="card"><h2>Diagnose</h2>
-  <div class="ni" id="di">…</div>
-  <div class="net" style="margin-top:10px">
-    <label style="margin:0">Sink-Adresse (IP des Laptops)</label>
-    <input type="text" id="dh" autocomplete="off" placeholder="192.168.178.188">
-    <label style="margin:0">Port</label>
-    <input type="text" id="dp" autocomplete="off" placeholder="9000">
-    <div class="row">
-      <button onclick="diagSpeichern(1)">Speichern und an</button>
-      <button class="warn" onclick="diagSpeichern(0)">Aus</button>
-    </div>
-    <div class="msg" id="dm"></div>
-  </div>
-</div>
-
-<div class="card"><h2>Netz</h2>
-  <div class="ni" id="ni">…</div>
-  <div class="net" style="margin-top:10px">
-    <label style="margin:0">WLAN-Name</label>
-    <input type="text" id="ws" autocomplete="off" placeholder="SSID">
-    <label style="margin:0">Passwort</label>
-    <input type="password" id="wp" autocomplete="off">
-    <label style="margin:0">Wartezeit, bis der eigene Accesspoint aufgeht —
-      <span class="val" id="lw">15</span> s</label>
-    <input type="range" id="rw" min="5" max="60" step="1" oninput="lw.textContent=rw.value">
-    <button onclick="netzSpeichern()">Speichern und neu starten</button>
-    <div class="msg" id="nm"></div>
-  </div>
-</div>
-
-<div class="card"><h2>Firmware einspielen</h2>
-  <div class="up">
-    <select id="ut">
-      <option value="/update">Firmware (firmware.bin)</option>
-      <option value="/updatefs">Dateisystem (littlefs.bin)</option>
-    </select>
-    <input type="file" id="uf" accept=".bin">
-    <input type="password" id="up" placeholder="OTA-Passwort" autocomplete="off">
-    <button onclick="senden()">Einspielen</button>
-    <div class="bar" id="ub"><i id="ubi"></i></div>
-    <div class="msg" id="um"></div>
-  </div>
-</div>
-
-<div class="foot" id="ver"></div>
-<div class="probe" id="pb"></div>
-
+<div class="c"><p>Oder am Rechner: <code>task ota:fs</code></p></div>
 </div><script>
-let halt=0;
-// The tag and the note belong to the next correction and are cleared after it.
-// Asking afterwards does not work: at the moment you press the button you know
-// why, and two minutes later you do not.
-let gewaehlt='';
-function marke(v){
-  gewaehlt = (gewaehlt===v) ? '' : v;
-  document.querySelectorAll('.tag').forEach(t=>
-    t.classList.toggle('on', t.dataset.v===gewaehlt));
-}
-function notieren(){
-  if(!kom.value && !gewaehlt){km.textContent='Erst eine Marke oder einen Text.';return}
-  const q=new URLSearchParams();
-  if(gewaehlt)q.set('tag',gewaehlt);
-  if(kom.value)q.set('note',kom.value);
-  halt=Date.now()+400;
-  fetch('/notiz?'+q).then(()=>{
-    km.innerHTML='Festgehalten, der Spielstand ist unberuehrt.';
-    gewaehlt=''; kom.value='';
-    document.querySelectorAll('.tag').forEach(t=>t.classList.remove('on'));
-    tick();
-  }).catch(()=>{km.textContent='Ging nicht.'});
-}
-function go(u){
-  const q=new URLSearchParams();
-  if(gewaehlt)q.set('tag',gewaehlt);
-  if(kom.value)q.set('note',kom.value);
-  const s=q.toString();
-  halt=Date.now()+400;
-  fetch(u + (s ? (u.includes('?')?'&':'?')+s : '')).then(()=>{
-    gewaehlt=''; kom.value='';
-    document.querySelectorAll('.tag').forEach(t=>t.classList.remove('on'));
-    tick();
-  });
-}
-function cfg(){
-  const a=ra.value,b=rb.value,t=rt.value;
-  la.textContent=a;lb.textContent=b;lt.textContent=t;
-  halt=Date.now()+400;
-  fetch(`/cfg?a=${a}&b=${b}&t=${t}`).then(tick);
-}
-function tick(){
-  if(Date.now()<halt)return;
-  fetch('/state').then(r=>r.json()).then(d=>{
-    sc.textContent=d.a+':'+d.b;
-    wa.textContent=d.na; wb.textContent=d.nb;
-    sv.textContent=d.over?'Spiel beendet':'Aufschlag '+(d.serve=='A'?d.na:d.nb);
-    wn.textContent=d.over?('Sieger: '+(d.winner=='A'?d.na:d.nb)):'';
-    bpa.textContent='Punkt '+d.na; bpb.textContent='Punkt '+d.nb;
-    // Not a warning, just the truth in view. A game played without a sink
-    // listening is gone the moment it is over, and nothing used to say so.
-    rc.className = 'rec ' + (d.rec ? 'on' : 'off');
-    rc.innerHTML = d.rec ? '\u25CF  wird aufgezeichnet'
-                         : '\u25CB  kein Sink erreichbar';
-    if(d.mock!==mockAn || d.auto!==autoAn) mockZeigen(d);
-    simAn = d.sim; simPause = d.pause; transportZeigen();
-    const namen=['','laeuft dauerhaft','spielt ein Spiel','spielt ein Match'];
-    ms2.textContent = d.sim ? ('Simulation '+namen[d.sim]+(d.pause?' (pausiert)':'')
-                               +'. Saetze '+d.sa+':'+d.sb+'.')
-                            : (d.sa||d.sb ? 'Match beendet. Saetze '+d.sa+':'+d.sb+'.' : '');
-    mg.textContent  = d.sim===2 ? 'Anhalten' : 'Ein Spiel';
-    mmm.textContent = d.sim===3 ? 'Anhalten' : 'Ein Match (best of 5)';
-    ma.textContent  = d.sim===1 ? 'Autoplay aus' : 'Autoplay an';
-    sq.innerHTML=[...d.rally].map(c=>`<div class="chip${c=='B'?' b':''}">${c}</div>`).join('');
-    lg.innerHTML=d.log.length?d.log.map(e=>
-      `<div class="entry${e.h?' w':''}"><div class="f">${[...e.f].join(' → ')}</div>
-       <div>${e.u}</div>${e.h?`<div class="h">${e.h}</div>`:''}</div>`).reverse().join('')
-      :'<div style="color:#5C6B7A;font-size:13px">Noch nichts gespielt.</div>';
-    pb.textContent = d.img==='pending'
-      ? 'Neuer Stand laeuft auf Probe. Bewaehrt er sich, wird er bestaetigt; '
-        +'stuerzt er ab, kommt der alte von selbst zurueck.'
-      : '';
-    if(document.activeElement.type!=='range'){
-      ra.value=d.ta;rb.value=d.tb;rt.value=d.to;
-      la.textContent=d.ta;lb.textContent=d.tb;lt.textContent=d.to;
-    }
-  }).catch(()=>{});
-}
-setInterval(tick,400);tick();
-function diagZeigen(d){
-  di.innerHTML = (!d.on
-      ? '<span class="warn">Aus</span> &mdash; ohne Sink-Adresse wird nichts protokolliert'
-      : d.alive
-        ? 'Sendet an <b>'+d.host+':'+d.port+'</b>, der Sink antwortet'
-        : '<span class="warn">'+d.host+':'+d.port+' antwortet nicht</span>'
-          + ' &mdash; es wird gehalten, nicht gesendet')
-    + '<br>Sitzung <b>'+d.session+'</b>'
-    + (d.held?'<br><span class="warn">'+d.held+' Ereignisse warten auf einen Sink</span>':'')
-    + (d.dropped?'<br><span class="warn">'+d.dropped+' Ereignisse verworfen</span>':'');
-  if(!dh.value && d.host)dh.value=d.host;
-  if(!dp.value)dp.value=d.port;
-}
-function diagLaden(){fetch('/diag').then(r=>r.json()).then(diagZeigen).catch(()=>{})}
-function diagSpeichern(on){
-  const q=new URLSearchParams({on:on});
-  if(dh.value)q.set('host',dh.value);
-  if(dp.value)q.set('port',dp.value);
-  halt=Date.now()+400;
-  fetch('/diag?'+q).then(r=>r.json()).then(d=>{
-    diagZeigen(d);
-    dm.textContent = d.on?'Laeuft. Auf dem Laptop muss der Sink lauschen.':'Aus.';
-  }).catch(()=>{dm.textContent='Ging nicht.'});
-}
-function spielerLaden(){
-  fetch('/spieler').then(r=>r.json()).then(d=>{
-    if(document.activeElement!==pa && !pa.value && d.named)pa.value=d.a;
-    if(document.activeElement!==pb && !pb.value && d.named)pb.value=d.b;
-    // One tap beats typing on a phone at a table.
-    zuletzt.innerHTML = d.letzte.map(n=>
-      `<div class="tag" onclick="einsetzen('${n.replace(/'/g,"\\'")}')">${n}</div>`).join('');
-  }).catch(()=>{});
-}
-function einsetzen(n){
-  const ziel = (document.activeElement===pb) ? pb : (pa.value ? pb : pa);
-  ziel.value = n;
-}
-function spielerSpeichern(){
-  halt=Date.now()+600;
-  fetch('/spieler?a='+encodeURIComponent(pa.value)+'&b='+encodeURIComponent(pb.value))
-    .then(r=>r.json()).then(d=>{
-      pm.textContent = d.named ? 'Uebernommen.' : 'Ohne Namen bleibt alles bei A und B.';
-      spielerLaden(); tick();
-    }).catch(()=>{pm.textContent='Ging nicht.'});
-}
-function seiten(){
-  halt=Date.now()+600;
-  fetch('/seiten').then(()=>{
-    sm.textContent='Gewechselt. Die Namen sind mitgewandert, die Piezos nicht.';
-    pa.value=''; pb.value='';
-    spielerLaden(); tick();
-  }).catch(()=>{});
-}
-let mockAn=false, autoAn=false;
-let simPause=false;
-function transport(){
-  halt=Date.now()+300;
-  fetch('/mock?t='+(simPause?'play':'pause')).then(r=>r.json()).then(d=>{
-    mockZeigen(d); tick();
-  }).catch(()=>{});
-}
-function mockZeigen(d){
-  mockAn=d.mock; autoAn=d.auto;
-  if(d.sim!==undefined){simAn=d.sim; simPause=d.pause; transportZeigen()}
-  mb.classList.toggle('on', mockAn);
-  mt.style.display = mockAn ? 'block' : 'none';
-  mq.textContent = mockAn ? 'Zurueck auf echtes Spiel' : 'Auf Mock umschalten';
-}
-function transportZeigen(){
-  tr.style.display = simAn ? 'flex' : 'none';
-  tb.textContent = simPause ? '\u25B6  Weiter' : '\u23F8  Pause';
-  tb.className = simPause ? '' : 'warn';
-  mb.textContent = '';
-  mb.insertAdjacentHTML('beforeend', mockAn
-    ? ('MOCK \u2014 die Treffer sind erfunden'
-       + (simAn ? (simPause ? ' \u00b7 pausiert' : ' \u00b7 laeuft') : '')
-       + '<small>Kein Piezo, kein Ball. Sitzungen aus diesem Modus tragen '
-       + '<code>sensor: mock</code>.</small>')
-    : '');
-}
-function mtrig(t,s){halt=Date.now()+300;
-  fetch('/mock?t='+t+'&s='+s).then(r=>r.json()).then(mockZeigen).catch(()=>{})}
-function quelle(){
-  halt=Date.now()+1200;
-  fetch('/mock?t='+(mockAn?'off':'on')).then(r=>r.json()).then(d=>{
-    mockZeigen(d);
-    mm.textContent = d.mock ? 'Mock laeuft. Neue Sitzung begonnen.'
-                            : 'Echtes Spiel. Neue Sitzung begonnen.';
-    tick();
-  }).catch(()=>{});
-}
-// 0 aus, 1 dauerhaft, 2 ein Spiel, 3 ein Match — wie in der Firmware.
-let simAn=0;
-function sim(t){
-  const aus = (simAn!==0);
-  halt=Date.now()+300;
-  fetch('/mock?t='+t+'&on='+(aus?0:1)).then(r=>r.json()).then(d=>{
-    mockZeigen(d); tick();
-  }).catch(()=>{});
-}
-function netLaden(){
-  fetch('/net').then(r=>r.json()).then(n=>{
-    ni.innerHTML =
-      (n.mode==='station'
-        ? 'Im WLAN <b>'+n.ssid+'</b>'
-        : 'Eigener Accesspoint <b>'+n.ssid+'</b>')
-      + '<br>Adresse <b>'+n.ip+'</b> &middot; <b>'+n.host+'</b>'
-      + '<br>Kanal <b>'+n.ch+'</b> <span class="warn">'
-      + '&mdash; ESP-NOW-Taster muessen auf diesem Kanal sitzen</span>';
-    if(!ws.value && n.mode==='station')ws.value=n.ssid;
-    rw.value=n.to; lw.textContent=n.to;
-  }).catch(()=>{});
-}
-function netzSpeichern(){
-  if(!ws.value){nm.textContent='Ohne WLAN-Namen geht es nicht.';return}
-  halt=Date.now()+30000;
-  const fertig='Gespeichert, das Board startet neu. Danach ist es im neuen WLAN '
-    +'zu erreichen &mdash; diese Seite hier nicht mehr. Klappt die Anmeldung '
-    +'nicht, spannt es nach der Wartezeit wieder seinen eigenen Accesspoint auf.';
-  fetch('/wifi',{method:'POST',
-    body:new URLSearchParams({ssid:ws.value,pass:wp.value,to:rw.value})})
-    .then(()=>{nm.innerHTML=fertig}).catch(()=>{nm.innerHTML=fertig});
-}
-function senden(){
-  if(!uf.files.length){um.textContent='Erst eine .bin waehlen.';return}
-  if(!up.value){um.textContent='Ohne Passwort geht es nicht.';return}
-  const fd=new FormData();fd.append('f',uf.files[0]);
+function s(){
+  if(!f.files.length){m.textContent='Erst eine .bin waehlen.';return}
+  if(!p.value){m.textContent='Ohne Passwort geht es nicht.';return}
+  const d=new FormData();d.append('f',f.files[0]);
   const x=new XMLHttpRequest();
-  x.open('POST',ut.value,true);
-  x.setRequestHeader('Authorization','Basic '+btoa('zaehlwerk:'+up.value));
-  ub.style.display='block';um.textContent='Laedt hoch...';halt=Date.now()+600000;
-  x.upload.onprogress=e=>{if(e.lengthComputable)ubi.style.width=(e.loaded/e.total*100)+'%'};
-  x.onload=()=>{
-    um.textContent=x.status===200
-      ?'Eingespielt. Der ESP startet neu — die Seite kommt in ein paar Sekunden zurueck.'
-      :(x.status===401?'Passwort falsch.':'Fehlgeschlagen: '+x.responseText);
-    if(x.status===200)setTimeout(()=>location.reload(),8000);else halt=0;
-  };
-  x.onerror=()=>{um.textContent='Verbindung abgebrochen.';halt=0};
-  x.send(fd);
+  x.open('POST',t.value,true);
+  x.setRequestHeader('Authorization','Basic '+btoa('zaehlwerk:'+p.value));
+  m.textContent='Laedt hoch ...';
+  x.onload=()=>{m.textContent=x.status===200
+    ?'Eingespielt. Neustart, die Seite kommt in ein paar Sekunden.'
+    :(x.status===401?'Passwort falsch.':'Fehlgeschlagen: '+x.responseText);
+    if(x.status===200)setTimeout(()=>location.reload(),8000)};
+  x.onerror=()=>{m.textContent='Verbindung abgebrochen.'};
+  x.send(d);
 }
-netLaden();
-spielerLaden();
-diagLaden();
-setInterval(diagLaden,5000);
-fetch('/version').then(r=>r.json()).then(v=>{
-  // Where this came from, on the page. Not because anybody reads it every day,
-  // but because the day somebody asks which build produced a recording, the
-  // answer has to be somewhere they can reach.
-  ver.innerHTML = v.fw+' \u00b7 '+v.git+' \u00b7 '+v.built
-    + '<br>'+v.repo+' \u00b7 laeuft seit '+Math.floor(v.uptime_s/60)+' min';
-  if(v.dirty)ver.classList.add('dirty');
-}).catch(()=>{});
 </script></body></html>)HTML";
 
 String jsonEscape(String s) { s.replace("\"", "'"); return s; }
@@ -993,6 +599,16 @@ void setup() {
   Serial.begin(115200);
   Serial.printf("\nZaehlwerk %s  git %s  built %s\n%s\n",
                 ZW_FW_VERSION, ZW_GIT_HASH, ZW_BUILD_DATE, ZW_GIT_REPO);
+
+  // The page comes from here. A board without it still answers, with a page
+  // that can put one back — see NOTFALL above.
+  if (!LittleFS.begin(false)) {
+    Serial.println("[fs] no filesystem — serving the recovery page only");
+  } else {
+    File f = LittleFS.open("/index.html", "r");
+    Serial.printf("[fs] index.html: %s\n", f ? String(f.size()).c_str() : "missing");
+    if (f) f.close();
+  }
   Serial.println("Start Game");
 
 #ifdef DEFAULT_MOCK
@@ -1009,7 +625,17 @@ void setup() {
   net::begin({ ZW_HOSTNAME, AP_PREFIX, AP_PASS,
                ZW_STA_SSID, ZW_STA_PASS, ZW_STA_TIMEOUT_MS });
 
-  server.on("/", []{ server.send_P(200, "text/html", SEITE); });
+  server.on("/", []{
+    File f = LittleFS.open("/index.html", "r");
+    if (!f || f.isDirectory()) {
+      // 503 rather than 200: something is wrong and a monitor should say so,
+      // even though the page it returns is useful.
+      server.send_P(503, "text/html", NOTFALL);
+      return;
+    }
+    server.streamFile(f, "text/html");
+    f.close();
+  });
   server.on("/state", handleState);
   server.on("/version", handleVersion);
   server.on("/net", handleNet);
