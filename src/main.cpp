@@ -85,6 +85,14 @@ volatile uint32_t sensorTicks = 0;
 // means little without it — the channels sit at different levels and drift.
 volatile int baselineA = 0, baselineB = 0;
 
+// What the channels are doing right now, for the bring-up at the table. The
+// baseline alone does not answer whether a channel sits still or jitters, and
+// that is the first thing to know: a lead acting as an antenna looks exactly
+// like a signal. Min and max span the window since the last read of /diag, so
+// each poll measures its own stretch of time rather than all of history.
+volatile int letzteA = 0, letzteB = 0;
+volatile int minA = 4095, maxA = 0, minB = 4095, maxB = 0;
+
 // Ids. Every hit belongs to a rally, every point to the rally it ended, so a
 // correction later can point at one thing rather than at a span of time.
 uint32_t rallyId = 0, pointId = 0;
@@ -112,6 +120,12 @@ void sensorTask(void *) {
     const bool ausMock = mock::on();
     int a = ausMock ? mock::read(true, jetztUs)  : analogRead(PIN_A);
     int b = ausMock ? mock::read(false, jetztUs) : analogRead(PIN_B);
+
+    letzteA = a; letzteB = b;
+    if (a < minA) minA = a;
+    if (a > maxA) maxA = a;
+    if (b < minB) minB = b;
+    if (b > maxB) maxB = b;
 
     vorlauf[vorlaufKopf] = { jetztUs, (int16_t)a, (int16_t)b };
     vorlaufKopf = (vorlaufKopf + 1) % diag::PRE_SAMPLES;
@@ -494,6 +508,11 @@ void handleState() {
   j += ",\"winner\":\"" + String(sieger) + "\"";
   j += ",\"rally\":\"" + rally + "\"";
   j += ",\"ta\":" + String(schwelleA) + ",\"tb\":" + String(schwelleB);
+  // The log thresholds decide what reaches the sink at all, so they belong in
+  // the UI and not only behind a curl. Step 1 of the bring-up is setting them
+  // per channel against each channel's own floor, which happens at the table.
+  j += ",\"la\":" + String(logSchwelleA) + ",\"lb\":" + String(logSchwelleB);
+  j += ",\"cr\":" + String(clearRatioPromille);
   j += ",\"to\":" + String(rallyTimeout);
   j += ",\"na\":\"" + jsonEscape(nameFuer('A')) + "\"";
   j += ",\"nb\":\"" + jsonEscape(nameFuer('B')) + "\"";
@@ -771,7 +790,14 @@ void setup() {
                diag::sinkPort() + ",\"on\":" + (diag::enabled() ? "true" : "false") +
                ",\"alive\":" + (diag::sinkAlive() ? "true" : "false") +
                ",\"session\":\"" + diag::sessionId() + "\",\"dropped\":" +
-               diag::droppedEvents() + ",\"held\":" + diag::heldEvents() + "}";
+               diag::droppedEvents() + ",\"held\":" + diag::heldEvents();
+    j += ",\"a\":" + String(letzteA) + ",\"b\":" + String(letzteB);
+    j += ",\"base_a\":" + String(baselineA) + ",\"base_b\":" + String(baselineB);
+    j += ",\"min_a\":" + String(minA) + ",\"max_a\":" + String(maxA);
+    j += ",\"min_b\":" + String(minB) + ",\"max_b\":" + String(maxB);
+    j += ",\"ticks\":" + String(sensorTicks) + "}";
+    // Reset the window: the next poll reports the next stretch, not all of time.
+    minA = 4095; maxA = 0; minB = 4095; maxB = 0;
     server.send(200, "application/json", j);
   });
   server.begin();

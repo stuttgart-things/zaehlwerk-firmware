@@ -128,6 +128,15 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   <input type="range" id="rb" min="50" max="2000" step="25" onchange="cfg()">
   <label>Ballwechsel-Timeout — <span class="val" id="lt">1500</span> ms</label>
   <input type="range" id="rt" min="500" max="4000" step="100" onchange="cfg()">
+
+  <div class="msg" style="margin-top:14px">Ab hier: was ins Protokoll wandert.
+  Tiefer heisst mehr Kurven im Sink, nicht mehr Punkte.</div>
+  <label>Log-Schwelle A — <span class="val" id="vla">120</span></label>
+  <input type="range" id="rla" min="20" max="1000" step="10" onchange="cfg()">
+  <label>Log-Schwelle B — <span class="val" id="vlb">120</span></label>
+  <input type="range" id="rlb" min="20" max="1000" step="10" onchange="cfg()">
+  <label>Trennschärfe — <span class="val" id="vcr">1800</span> ‰</label>
+  <input type="range" id="rcr" min="1000" max="3000" step="50" onchange="cfg()">
 </div>
 
 <div class="card"><h2>Protokoll</h2><div id="lg"></div></div>
@@ -247,9 +256,11 @@ function go(u){
 }
 function cfg(){
   const a=ra.value,b=rb.value,t=rt.value;
+    const xa=rla.value,xb=rlb.value,cr=rcr.value;
   la.textContent=a;lb.textContent=b;lt.textContent=t;
+    vla.textContent=xa;vlb.textContent=xb;vcr.textContent=cr;
   halt=Date.now()+400;
-  fetch(`/cfg?a=${a}&b=${b}&t=${t}`).then(tick);
+  fetch(`/cfg?a=${a}&b=${b}&t=${t}&la=${xa}&lb=${xb}&cr=${cr}`).then(tick);
 }
 function tick(){
   if(Date.now()<halt)return;
@@ -284,6 +295,8 @@ function tick(){
       : '';
     if(document.activeElement.type!=='range'){
       ra.value=d.ta;rb.value=d.tb;rt.value=d.to;
+      rla.value=d.la;rlb.value=d.lb;rcr.value=d.cr;
+      vla.textContent=d.la;vlb.textContent=d.lb;vcr.textContent=d.cr;
       la.textContent=d.ta;lb.textContent=d.tb;lt.textContent=d.to;
     }
   }).catch(()=>{});
