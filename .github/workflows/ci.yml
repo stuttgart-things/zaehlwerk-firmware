@@ -122,7 +122,7 @@ jobs:
           pio run -e piezo-test
           pio run -e piezo -t buildfs
 
-      - name: artefacts hold no credentials
+      - name: artefacts hold no private credentials
         run: |
           # secrets.ini is never in a fresh checkout, so the build falls back to
           # the empty defaults in include/config.h. Assert that rather than trust
@@ -135,11 +135,21 @@ jobs:
           python3 - <<'PY'
           import pathlib, re, sys
           hdr = pathlib.Path("include/config.h").read_text()
+
+          # These must be empty, or a published binary carries somebody's network.
           for name in ("ZW_STA_PASS", "ZW_OTA_PASS", "ZW_STA_SSID"):
               m = re.search(rf'#define\s+{name}\s+"([^"]*)"', hdr)
               if m is None or m.group(1) != "":
                   sys.exit(f"{name} has a baked-in default: {m and m.group(1)!r}")
-          print("credential defaults are empty; OTA ships disabled")
+
+          # ZW_AP_PASS deliberately does have one: the fallback access point must
+          # not come up open. It is in include/config.h for anyone to read, so it
+          # is a published default and not a secret — say so rather than let the
+          # step name imply the access point is protected by something private.
+          ap = re.search(r'#define\s+ZW_AP_PASS\s+"([^"]*)"', hdr)
+          print("no private credentials; OTA ships disabled")
+          print(f"access point password is the published default from "
+                f"include/config.h ({len(ap.group(1)) if ap else 0} characters)")
           PY
 
       - name: sizes
