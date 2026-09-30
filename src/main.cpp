@@ -55,7 +55,7 @@ const char *AP_PASS   = ZW_AP_PASS;
 
 volatile int schwelleA   = 300;
 volatile int schwelleB   = 300;
-volatile int rallyTimeout = 3000;   // ms Stille = Ballwechsel vorbei
+volatile int rallyTimeout = 1500;   // ms Stille = Ballwechsel vorbei
 
 // Everything above log_threshold is written to the log, whether or not it
 // counts. Below the counting threshold on purpose: the crossings that were
