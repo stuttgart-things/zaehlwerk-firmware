@@ -78,6 +78,17 @@ jobs:
           That is deliberate: a published binary built on a laptop would contain
           that laptop's wifi and OTA passwords in plaintext.
 
+          ## First boot comes up as its own access point
+
+          A released image carries no wifi credentials either, and a fresh board has
+          none stored, so it opens **\`Zaehlwerk-<chip id>\`** and serves the page at
+          <http://192.168.4.1>. The password is the default in \`include/config.h\` —
+          in the repository for anyone to read, which is deliberate: an open access
+          point would be worse, a secret one impossible to publish.
+
+          Enter your wifi there. It is stored in NVS, used from the next start, and
+          it survives further firmware updates.
+
           ## Files
 
           | File | What |
