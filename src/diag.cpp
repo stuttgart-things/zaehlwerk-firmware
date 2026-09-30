@@ -206,6 +206,11 @@ void sayHello() {
   f += String(",\"fw_version\":\"") + ZW_FW_VERSION + "\"";
   f += String(",\"git_hash\":\"") + ZW_GIT_HASH + "\"";
   f += String(",\"build_date\":\"") + ZW_BUILD_DATE + "\"";
+  f += String(",\"repo\":\"") + ZW_GIT_REPO + "\"";
+  // How long this image had been running when the session started. There is no
+  // clock on the board, so this is the closest it can come to saying when it
+  // was written: a session that starts at nought was a fresh boot.
+  f += ",\"uptime_s\":" + String((uint32_t)(millis() / 1000));
   f += String(",\"sensor\":\"") + cfg_.sensor + "\"";
   f += String(",\"reason\":\"") + cfg_.reason + "\"";
   f += ",\"params\":" + (parameters_ ? parameters_() : cfg_.paramsJson);

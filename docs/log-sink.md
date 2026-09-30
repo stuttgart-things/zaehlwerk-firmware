@@ -67,10 +67,21 @@ stood when the game started, and `params_changed` for every knob turned during
 it, with the time and who turned it. Without both, a file could describe a game
 played under thresholds it never had.
 
-`firmware` carries the version, the git hash **and the build date**, because two
-builds from the same uncommitted tree are otherwise indistinguishable and a
-measurement that cannot name the binary that produced it is one nobody can
-repeat.
+`firmware` says where the binary came from: the version, the git hash, the
+**repository** and the **build date**. Two builds from the same uncommitted tree
+are otherwise indistinguishable, and a hash on its own names a commit in *some*
+repository — a recording that outlives somebody's memory of which project it
+came from is still readable with the slug beside it.
+
+**There is no flash timestamp, because the board has no clock.** No RTC, no NTP:
+`t_us` is microseconds since boot and the only wall clock in the system is the
+`recv_at` the sink stamps on arrival. With `task flash` and `task ota` the build
+happens in the same command as the upload, so `built` *is* when it was written;
+where they differ, `uptime_s_at_session_start` says how long the image had been
+running when the recording began — nought means a fresh boot.
+
+**The version comes from git tags.** There are none yet, so it reads `0.0.0-dev`.
+Tag a commit and it becomes `v0.2.0`, or `v0.2.0-3-gabc1234` three commits later.
 
 The raw curves are left out by default — they are what makes a session file
 large and they only matter while somebody is working on detection. `-samples`

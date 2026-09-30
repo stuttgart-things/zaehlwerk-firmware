@@ -869,7 +869,11 @@ spielerLaden();
 diagLaden();
 setInterval(diagLaden,5000);
 fetch('/version').then(r=>r.json()).then(v=>{
-  ver.textContent=v.fw+' \u00b7 '+v.git;
+  // Where this came from, on the page. Not because anybody reads it every day,
+  // but because the day somebody asks which build produced a recording, the
+  // answer has to be somewhere they can reach.
+  ver.innerHTML = v.fw+' \u00b7 '+v.git+' \u00b7 '+v.built
+    + '<br>'+v.repo+' \u00b7 laeuft seit '+Math.floor(v.uptime_s/60)+' min';
   if(v.dirty)ver.classList.add('dirty');
 }).catch(()=>{});
 </script></body></html>)HTML";
@@ -912,6 +916,8 @@ void handleVersion() {
   String j = String("{\"fw\":\"") + ZW_FW_VERSION
            + "\",\"git\":\"" + ZW_GIT_HASH
            + "\",\"built\":\"" + ZW_BUILD_DATE + "\""
+           + ",\"repo\":\"" + ZW_GIT_REPO + "\""
+           + ",\"uptime_s\":" + String((uint32_t)(millis() / 1000))
            + ",\"dirty\":" + (ZW_GIT_DIRTY ? "true" : "false") + "}";
   server.send(200, "application/json", j);
 }
@@ -985,8 +991,8 @@ void handleWifi() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\nZaehlwerk %s  git %s  built %s\n",
-                ZW_FW_VERSION, ZW_GIT_HASH, ZW_BUILD_DATE);
+  Serial.printf("\nZaehlwerk %s  git %s  built %s\n%s\n",
+                ZW_FW_VERSION, ZW_GIT_HASH, ZW_BUILD_DATE, ZW_GIT_REPO);
   Serial.println("Start Game");
 
 #ifdef DEFAULT_MOCK
