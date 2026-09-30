@@ -8,6 +8,10 @@ body{background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system
 .wrap{max-width:520px;margin:0 auto}
 .board{background:#12171D;border-radius:10px;padding:22px 18px;text-align:center}
 .score{font:700 74px/1 ui-monospace,Menlo,monospace;color:#F5F7F9;letter-spacing:2px}
+.weg-bar{display:none;background:#B3261E;color:#fff;padding:10px 14px;border-radius:8px;
+margin-bottom:12px;font:700 13px inherit;text-align:center}
+body.weg .weg-bar{display:block}
+body.weg .board{opacity:.45}
 .mock{display:none;background:var(--orange);color:#fff;border-radius:8px;
 padding:10px 14px;margin-bottom:12px;font:700 13px inherit;letter-spacing:.04em;
 text-align:center}
@@ -66,7 +70,8 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 .ni{font:12px/1.7 ui-monospace,monospace;color:var(--muted)}
 .ni b{color:var(--ink)}
 .ni .warn{color:var(--orange)}
-</style></head><body><div class="wrap">
+</style></head><body>
+<div class="weg-bar">Keine Verbindung zum Zaehlwerk — angezeigte Werte sind alt</div><div class="wrap">
 
 <div class="mock" id="mb">MOCK &mdash; die Treffer sind erfunden
   <small>Kein Piezo, kein Ball. Sitzungen aus diesem Modus tragen
@@ -281,6 +286,7 @@ function cfg(){
   halt=Date.now()+400;
   fetch(`/cfg?a=${a}&b=${b}&t=${t}&la=${xa}&lb=${xb}&cr=${cr}`).then(tick);
 }
+let stand = Date.now();
 function tick(){
   if(Date.now()<halt)return;
   fetch('/state').then(r=>r.json()).then(d=>{
@@ -321,7 +327,14 @@ function tick(){
       vla.textContent=d.la;vlb.textContent=d.lb;vcr.textContent=d.cr;
       la.textContent=d.ta;lb.textContent=d.tb;lt.textContent=d.to;
     }
-  }).catch(()=>{});
+    stand = Date.now();
+    document.body.classList.remove('weg');
+  }).catch(()=>{
+    // A silent catch is how a whole game got played against a frozen
+    // scoreboard: the page kept showing the last state it had and said
+    // nothing. Three seconds without an answer and it says so.
+    if(Date.now()-stand > 3000) document.body.classList.add('weg');
+  });
 }
 setInterval(tick,400);tick();
 function diagZeigen(d){
