@@ -15,12 +15,17 @@ text-align:center}
 .mock small{display:block;font-weight:400;letter-spacing:0;opacity:.9;margin-top:2px}
 .who{display:flex;justify-content:space-between;font:600 13px inherit;
 color:#9AA7B4;margin-bottom:4px;gap:12px}
-.who span{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who span{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color .15s}
+/* The serve belongs where the eye already is. It lived only in an 11px
+   caption under a 74px score, and a whole game went by without anybody
+   noticing it had changed. */
+.who span.srv{color:var(--orange);font-weight:800}
+.who span.srv::before{content:"\25CF";margin-right:5px;font-size:10px;vertical-align:1px}
 .ends{margin-top:12px}
 .rec{margin-top:8px;font:11px ui-monospace,monospace;letter-spacing:.05em}
 .rec.on{color:var(--teal)}
 .rec.off{color:#8A94A0}
-.serve{margin-top:10px;font-size:11px;letter-spacing:.16em;color:var(--orange);text-transform:uppercase}
+.serve{margin-top:10px;font-size:13px;font-weight:700;letter-spacing:.1em;color:var(--orange);text-transform:uppercase}
 .won{margin-top:8px;color:var(--teal);font-size:13px}
 .seq{display:flex;gap:5px;justify-content:center;margin-top:14px;min-height:26px;flex-wrap:wrap}
 .chip{width:24px;height:24px;border-radius:4px;display:grid;place-items:center;
@@ -282,6 +287,8 @@ function tick(){
     sc.textContent=d.a+':'+d.b;
       kst.textContent=d.a+':'+d.b;
     wa.textContent=d.na; wb.textContent=d.nb;
+    wa.classList.toggle('srv', !d.over && d.serve=='A');
+    wb.classList.toggle('srv', !d.over && d.serve=='B');
     sv.textContent=d.over?'Spiel beendet':'Aufschlag '+(d.serve=='A'?d.na:d.nb);
     wn.textContent=d.over?('Sieger: '+(d.winner=='A'?d.na:d.nb)):'';
     bpa.textContent='Punkt '+d.na; bpb.textContent='Punkt '+d.nb;
