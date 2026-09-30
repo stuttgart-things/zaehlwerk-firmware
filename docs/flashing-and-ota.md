@@ -193,6 +193,7 @@ not reuse a password from anywhere else for it.
 | | |
 | --- | --- |
 | `task setup` | write `secrets.ini`, passwords prompted without echo |
+| `task status` | where everything stands: board, wifi and channel, laptop, sink, play |
 | `task check` | tools, board, serial port, passwords, wifi, git state |
 | `task flash` | the USB flash, refusing if a monitor holds the port |
 | `task boot` | reset and print the boot lines, so the slot and image state are visible |
@@ -201,6 +202,24 @@ not reuse a password from anywhere else for it.
 | `task board` | ask a running board over HTTP what it is |
 | `task board` | which network, address and channel it is on |
 | `task wifi:esp` / `task wifi:back` | join the board's own access point and come back |
+
+`task status` and `task check` answer different questions. `check` asks whether
+anything is in the way before you start; `status` answers "what am I looking at",
+which is what somebody asks after a break, a move to another room, or a reflash:
+
+```
+  Board    192.168.10.109   git 4cba79b   built 2026-09-30T05:24Z
+           wifi "sthings", channel 9, zaehlwerk.local
+  Laptop   192.168.10.136   same network
+  Log      192.168.10.136:9000 answers
+           session e32c868a
+  Sink     running here, pid 27707
+  Play     mock, A vs B, 0:0, set 1
+```
+
+Whether the laptop is on the same network as the board is the line that decides
+whether an upload or the log can reach anywhere, so it is stated rather than left
+to be worked out from two addresses.
 
 The reachability check in `task ota` exists because an upload to a board that
 is not there fails as `No response from the ESP`, which reads like dead hardware
