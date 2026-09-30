@@ -89,6 +89,94 @@ tasks:
         gum log --level warn "These are compiled in. Changing one means one more USB flash."
         [ -z "$sta" ] || gum log --level info "The wifi only seeds the first connection; after that the web UI writes it to NVS."
 
+  status:
+    desc: Where everything stands — board, laptop, sink, mode
+    silent: true
+    cmds:
+      - |
+        # Not the same question as `task check`. That one asks whether anything
+        # is in the way before you start; this one answers "what am I looking
+        # at", which is what somebody asks after a break, a move or a reflash.
+        gum style --border rounded --padding "0 1" --border-foreground 212 "zaehlwerk"
+
+        laptop=$(ifconfig {{.WIFI_DEV}} 2>/dev/null | awk '/inet /{print $2}' | head -1)
+        sink_pid=$(pgrep -f 'log-sink' | head -1)
+
+        curl -4 -sf -m 5 "http://{{.ESP_HOST}}/version" > /tmp/zw-st-v 2>/dev/null || :
+        curl -4 -sf -m 5 "http://{{.ESP_HOST}}/state"   > /tmp/zw-st-s 2>/dev/null || :
+        curl -4 -sf -m 5 "http://{{.ESP_HOST}}/diag"    > /tmp/zw-st-d 2>/dev/null || :
+        curl -4 -sf -m 5 "http://{{.ESP_HOST}}/net"     > /tmp/zw-st-n 2>/dev/null || :
+
+        LAPTOP="$laptop" SINKPID="$sink_pid" HOST="{{.ESP_HOST}}" python3 - <<'PYEOF'
+        import json, os, sys
+
+        def load(p):
+            try:
+                with open(p) as f:
+                    return json.load(f)
+            except Exception:
+                return None
+
+        v, st, dg, nt = (load("/tmp/zw-st-" + k) for k in ("v", "s", "d", "n"))
+        laptop = os.environ.get("LAPTOP") or "no address"
+        host = os.environ["HOST"]
+
+        if not v:
+            print("  Board    %s does not answer" % host)
+            print("           on the same network? a reset takes 15s to fall back")
+            print("           'task boot' reads it over the cable")
+        else:
+            ip = (nt or {}).get("ip", "?")
+            dirty = "  DIRTY" if v.get("dirty") else ""
+            print("  Board    %-16s git %s   built %s%s"
+                  % (ip, v.get("git", "?"), v.get("built", "?"), dirty))
+            if nt:
+                where = ('wifi "%s"' % nt.get("ssid") if nt.get("mode") == "station"
+                         else 'own access point "%s"' % nt.get("ssid"))
+                print("           %s, channel %s, %s" % (where, nt.get("ch"), nt.get("host")))
+
+        # Same network matters more than the addresses themselves: it is what
+        # decides whether an upload or the log can reach anywhere.
+        same = ""
+        bip = (nt or {}).get("ip")
+        if bip and laptop.count(".") == 3:
+            same = ("same network" if bip.rsplit(".", 1)[0] == laptop.rsplit(".", 1)[0]
+                    else "DIFFERENT network from the board")
+        print("  Laptop   %-16s %s" % (laptop, same))
+
+        if dg:
+            if not dg.get("on"):
+                sink = "logging off — nothing is being recorded"
+            elif dg.get("alive"):
+                sink = "%s:%s answers" % (dg.get("host"), dg.get("port"))
+            elif dg.get("held"):
+                sink = "%s:%s does not answer — %s events held for it" % (
+                    dg.get("host"), dg.get("port"), dg["held"])
+            else:
+                # Nothing held yet is not the same as nothing being kept.
+                sink = "%s:%s does not answer — anything scored now is held" % (
+                    dg.get("host"), dg.get("port"))
+            if dg.get("held") and dg.get("alive"):
+                sink += ", %s still queued" % dg["held"]
+            if dg.get("dropped"):
+                sink += ", %s dropped" % dg["dropped"]
+            print("  Log      %s" % sink)
+            print("           session %s" % dg.get("session"))
+        print("  Sink     %s" % ("running here, pid " + os.environ["SINKPID"]
+                                 if os.environ.get("SINKPID") else "not running here"))
+
+        if st:
+            mode = "mock" if st.get("mock") else "real game"
+            sim = ["", "autoplay", "one game", "one match"][st.get("sim", 0)]
+            if sim and st.get("pause"):
+                sim += " (paused)"
+            names = "%s vs %s" % (st.get("na"), st.get("nb")) if st.get("named") else "A vs B"
+            print("  Play     %s, %s, %d:%d, set %s%s"
+                  % (mode, names, st.get("a", 0), st.get("b", 0), st.get("satz", "?"),
+                     ", simulating " + sim if sim else ""))
+        PYEOF
+        rm -f /tmp/zw-st-v /tmp/zw-st-s /tmp/zw-st-d /tmp/zw-st-n
+
   check:
     desc: Whether anything is in the way — tools, board, network, passwords
     silent: true
