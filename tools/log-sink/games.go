@@ -193,8 +193,9 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 			// say which binary produced it is one nobody can repeat.
 			firmware = map[string]any{
 				"version": m["fw_version"], "git": m["git_hash"],
-				"built": m["build_date"], "sensor": m["sensor"],
-				"device": m["device_id"],
+				"repo": m["repo"], "built": m["build_date"],
+				"uptime_s_at_session_start": m["uptime_s"],
+				"sensor":                    m["sensor"], "device": m["device_id"],
 			}
 			if p, ok := m["params"].(map[string]any); ok {
 				params = p

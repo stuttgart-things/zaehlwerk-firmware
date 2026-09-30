@@ -20,3 +20,9 @@
 #ifndef ZW_BUILD_DATE
 #define ZW_BUILD_DATE "unknown"
 #endif
+
+// owner/repo. A hash on its own names a commit in some repository; with this it
+// names a commit.
+#ifndef ZW_GIT_REPO
+#define ZW_GIT_REPO "unknown"
+#endif
