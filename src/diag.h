@@ -110,6 +110,11 @@ void match(const char *phase, const String &nameA, const String &nameB,
 void param(const char *name, const String &from, const String &to, const char *by);
 void note(const char *level, const String &text);
 
+// An observation that changed no score: something seen at the table that is
+// worth writing down but is not a correction. Carries the rally it belongs to,
+// so it can be read next to the crossings it was about.
+void mark(const String &tag, const String &text, uint32_t rallyId);
+
 // Settings, stored in NVS.
 void setSink(const String &host, uint16_t port);
 void setEnabled(bool on);

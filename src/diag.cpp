@@ -384,6 +384,13 @@ void note(const char *level, const String &text) {
   emitNow("note", String(",\"level\":\"") + level + "\",\"text\":\"" + esc(text) + "\"");
 }
 
+void mark(const String &tag, const String &text, uint32_t rallyId) {
+  String f = String(",\"level\":\"note\",\"text\":\"") + esc(text) + "\"";
+  if (tag.length()) f += ",\"tag\":\"" + esc(tag) + "\"";
+  f += String(",\"rally_id\":\"") + sessionId_ + "-r" + rallyId + "\"";
+  emitNow("note", f);
+}
+
 void setSink(const String &host, uint16_t port) {
   host_ = host;
   port_ = port;

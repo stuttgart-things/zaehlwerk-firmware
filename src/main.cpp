@@ -525,6 +525,9 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
     <div class="tag" data-v="other"       onclick="marke('other')">Sonstiges</div>
   </div>
   <input class="kom" id="kom" placeholder="Was ist passiert? (optional)" autocomplete="off">
+  <div class="msg" id="km" style="margin:-4px 0 8px">Marke und Text gelten fuer die
+    naechste Korrektur. Nur festhalten, ohne den Spielstand zu aendern:
+    <a href="#" onclick="notieren();return false">notieren</a>.</div>
   <div class="row">
     <button id="bpa" onclick="go('/punkt?s=A')">Punkt A</button>
     <button id="bpb" onclick="go('/punkt?s=B')">Punkt B</button>
@@ -650,6 +653,19 @@ function marke(v){
   gewaehlt = (gewaehlt===v) ? '' : v;
   document.querySelectorAll('.tag').forEach(t=>
     t.classList.toggle('on', t.dataset.v===gewaehlt));
+}
+function notieren(){
+  if(!kom.value && !gewaehlt){km.textContent='Erst eine Marke oder einen Text.';return}
+  const q=new URLSearchParams();
+  if(gewaehlt)q.set('tag',gewaehlt);
+  if(kom.value)q.set('note',kom.value);
+  halt=Date.now()+400;
+  fetch('/notiz?'+q).then(()=>{
+    km.innerHTML='Festgehalten, der Spielstand ist unberuehrt.';
+    gewaehlt=''; kom.value='';
+    document.querySelectorAll('.tag').forEach(t=>t.classList.remove('on'));
+    tick();
+  }).catch(()=>{km.textContent='Ging nicht.'});
 }
 function go(u){
   const q=new URLSearchParams();
@@ -1094,6 +1110,19 @@ void setup() {
                 ",\"auto\":" + (mock::autoplay() ? "true" : "false") +
                 ",\"sim\":" + String((int)simulation) +
                 ",\"pause\":" + (mock::paused() ? "true" : "false") + "}");
+  });
+
+  // Something seen that changed no score. Without this the only way to write a
+  // thing down was to correct something, which is a poor reason to touch a
+  // scoreboard.
+  server.on("/notiz", []{
+    const String t = server.arg("note");
+    const String m = server.arg("tag");
+    if (t.length() || m.length()) {
+      diag::mark(m, t, rallyId);
+      logEintragen("", "Notiz", t.length() ? t : m);
+    }
+    server.send(200, "text/plain", "ok");
   });
 
   server.on("/seiten", []{
