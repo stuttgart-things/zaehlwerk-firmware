@@ -57,13 +57,21 @@ static void the_point_goes_to_the_side_of_the_second_to_last_bounce() {
   TEST_ASSERT_TRUE(u.hinweis.empty());
 }
 
-static void a_single_bounce_is_a_botched_serve() {
-  // Awards again, as the sketch did — see game.cpp for why it was switched off
-  // and switched back on the same evening.
+static void a_single_bounce_awards_nothing() {
+  // Fired five times across two games on 2026-10-01 and four were taken back
+  // within seconds. The sequence is recorded, the point is given by hand.
   game::Urteil u = game::rallyBewerten("A", 'A');
-  TEST_ASSERT_EQUAL_CHAR('B', u.gewinner);
+  TEST_ASSERT_EQUAL_CHAR(' ', u.gewinner);
   TEST_ASSERT_EQUAL_STRING("single_bounce", u.grund);
   TEST_ASSERT_TRUE(u.hinweis.find("Nur ein Aufsetzer") != std::string::npos);
+}
+
+// The rule beside it still awards: four times in the same two games, never
+// corrected. Switching both off together was the mistake the evening before.
+static void an_unclear_serve_still_awards() {
+  game::Urteil u = game::rallyBewerten("AB", 'A');
+  TEST_ASSERT_EQUAL_CHAR('A', u.gewinner);
+  TEST_ASSERT_EQUAL_STRING("serve_unclear", u.grund);
 }
 
 static void two_bounces_from_the_serve_are_ambiguous() {
@@ -149,7 +157,8 @@ int main(int, char **) {
   RUN_TEST(eleven_points_with_two_clear_ends_the_set);
   RUN_TEST(a_single_point_lead_carries_on);
   RUN_TEST(the_point_goes_to_the_side_of_the_second_to_last_bounce);
-  RUN_TEST(a_single_bounce_is_a_botched_serve);
+  RUN_TEST(a_single_bounce_awards_nothing);
+  RUN_TEST(an_unclear_serve_still_awards);
   RUN_TEST(two_bounces_from_the_serve_are_ambiguous);
   RUN_TEST(a_longer_rally_still_awards);
   RUN_TEST(a_double_bounce_still_awards);
