@@ -241,9 +241,16 @@ void begin(const Config &cfg) {
   // A fixed local port, so the sink can answer without being told one.
   udp.begin(ZW_DIAG_PORT);
 
-  Serial.printf("[diag] session %s, sink %s:%u, %s\n", sessionId_,
-                host_.length() ? host_.c_str() : "(none)", port_,
-                sendable() ? "on" : "off");
+  // Three separate things, said separately. Printing sendable() as "on"/"off"
+  // read as "recording is disabled" when all it meant was that the sink had not
+  // answered a ping yet — which it cannot have, a few milliseconds after boot. It
+  // cost two wrong conclusions about settings not surviving a restart, when they
+  // do: host, port and the switch are all in NVS.
+  Serial.printf("[diag] session %s, sink %s:%u, recording %s, sink %s\n",
+                sessionId_, host_.length() ? host_.c_str() : "(none)", port_,
+                enabled() ? "on" : "off",
+                !host_.length() ? "not configured"
+                                : (sinkAlive() ? "answering" : "not answering yet"));
 
   // The only place the build and the parameters are stated in full. Everything
   // downstream is read against it.
