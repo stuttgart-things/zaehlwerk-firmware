@@ -286,6 +286,23 @@ function cfg(){
   halt=Date.now()+400;
   fetch(`/cfg?a=${a}&b=${b}&t=${t}&la=${xa}&lb=${xb}&cr=${cr}`).then(tick);
 }
+// Resolving zaehlwerk.local costs five seconds per request on a phone and a Mac:
+// the IPv6 lookup never gets an answer and has to time out, while the board itself
+// replies in 23 ms. Measured 5.18 / 5.12 / 5.05 s by name against 0.023 s by
+// address. At a 400 ms poll that is permanent lateness, which is what raised the
+// "no connection" bar twice during a game the board counted perfectly.
+//
+// So the first thing the page does is move itself to the address. One name lookup
+// on the way in, none after. If the board gets a different address later, the
+// name still finds it and the page moves again.
+(function zurAdresse(){
+  if(/^\d+\.\d+\.\d+\.\d+$/.test(location.hostname)) return;   // schon dort
+  fetch('/net').then(r=>r.json()).then(d=>{
+    if(d && d.ip && d.ip !== '0.0.0.0')
+      location.replace('http://' + d.ip + location.pathname + location.search);
+  }).catch(()=>{});   // kein Netz, keine Umleitung — die Seite tut es auch so
+})();
+
 let stand = Date.now();
 function tick(){
   if(Date.now()<halt)return;
@@ -336,6 +353,22 @@ function tick(){
     if(Date.now()-stand > 3000) document.body.classList.add('weg');
   });
 }
+// A phone freezes its timers when the screen locks or the app goes to the
+// background. On waking, "last answer" is minutes old, so the first poll failing
+// — the phone's own wifi not back yet — raised the bar instantly although the
+// board had been reachable the whole time. It was seen twice in one game while
+// the board delivered all 884 diagnostic records without a gap.
+//
+// So waking resets the clock and asks straight away. The bar now means the board
+// did not answer for three seconds while the page was actually watching.
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden){
+    stand = Date.now();
+    document.body.classList.remove('weg');
+    halt = 0;
+    tick();
+  }
+});
 setInterval(tick,400);tick();
 function diagZeigen(d){
   di.innerHTML = (!d.on

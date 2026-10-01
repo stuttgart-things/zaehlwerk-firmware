@@ -47,9 +47,21 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
   // switched off was worse, not better: almost every rally ended with nobody
   // getting the point and somebody reaching for the phone. The reason is still
   // recorded, so the log says which rule decided and how confident it was.
+  // One bounce and then silence is not a rally. It is the ball settling after the
+  // point was already decided, or a ball being picked up off the table — and
+  // awarding it to the other side is a coin flip.
+  //
+  // Measured over two games on 2026-10-01: this fired five times and **four of
+  // them were taken back within seconds**, which is four of the six corrections
+  // in those games. The rule next to it, serve_unclear, fired four times and was
+  // never corrected — which is why only this one stops awarding. Both were
+  // switched off together the evening before, bundled with four other changes
+  // that made counting worse, and both came back when that was reverted. This is
+  // the half the data supports.
   if (folge.length() == 1) {
-    u.hinweis = "Nur ein Aufsetzer — Aufschlag ins Netz oder ins Aus.";
-    u.grund   = "single_bounce";
+    u.hinweis  = "Nur ein Aufsetzer — kein Punkt, bitte selbst vergeben.";
+    u.grund    = "single_bounce";
+    u.gewinner = ' ';
   }
   if (folge.length() == 2 && folge[0] == aufschlag && folge[1] == andere(aufschlag)) {
     u.hinweis = "Ass oder Netzaufschlag? Nicht unterscheidbar — bitte pruefen.";
