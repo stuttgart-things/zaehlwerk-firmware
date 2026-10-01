@@ -92,11 +92,26 @@ QueueHandle_t queue;
 #ifndef ZW_SENSOR_CORE
 #define ZW_SENSOR_CORE 0
 #endif
-#if ZW_CONTINUOUS_SAMPLING
-  #define ZW_SENSOR_YIELD() taskYIELD()
-#else
-  #define ZW_SENSOR_YIELD() vTaskDelay(1)
+// How many readings between one tick of sleep. A bare taskYIELD() here starved
+// core 1's idle task: the image booted, confirmed itself valid after the ten
+// second probation and then crash-looped every thirty-five seconds — past the
+// point where the rollback could still help. FreeRTOS needs the idle task to run.
+// Sixty-four readings is about eleven milliseconds of sampling for one
+// millisecond of sleep, so roughly 5 kHz survives and the core stays alive.
+#ifndef ZW_YIELD_EVERY
+#define ZW_YIELD_EVERY 64
 #endif
+
+#if ZW_CONTINUOUS_SAMPLING
+inline void sensorYield() {
+  static uint16_t seit = 0;
+  if (++seit >= ZW_YIELD_EVERY) { seit = 0; vTaskDelay(1); }
+  else                          taskYIELD();
+}
+#else
+inline void sensorYield() { vTaskDelay(1); }
+#endif
+#define ZW_SENSOR_YIELD() sensorYield()
 
 TaskHandle_t sensorTaskHandle = nullptr;
 volatile uint32_t sensorTicks = 0;

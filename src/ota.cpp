@@ -20,7 +20,14 @@ namespace {
 // How long a new build has to run without trouble before it is confirmed. Long
 // enough that wifi, the web server and the sensor task really stood up; short
 // enough that nobody waits for it.
-const uint32_t PROBATION_MS = 10000;
+// Ten seconds was not enough and it cost an evening. A build that sampled
+// continuously on core 1 started, satisfied the health check within a fifth of a
+// second, confirmed itself at ten — and then crash-looped every thirty-five.
+// Confirmation is irreversible, so the window has to outlast the failures that
+// take a while to show: starvation, a leak, a watchdog that fires once the
+// radio has been busy for a bit. Forty-five seconds covers that one and is still
+// over before anybody has walked back to the table.
+const uint32_t PROBATION_MS = 45000;
 
 WebServer *server_ = nullptr;
 Config cfg_{};
