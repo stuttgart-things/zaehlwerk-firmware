@@ -336,6 +336,22 @@ function tick(){
     if(Date.now()-stand > 3000) document.body.classList.add('weg');
   });
 }
+// A phone freezes its timers when the screen locks or the app goes to the
+// background. On waking, "last answer" is minutes old, so the first poll failing
+// — the phone's own wifi not back yet — raised the bar instantly although the
+// board had been reachable the whole time. It was seen twice in one game while
+// the board delivered all 884 diagnostic records without a gap.
+//
+// So waking resets the clock and asks straight away. The bar now means the board
+// did not answer for three seconds while the page was actually watching.
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden){
+    stand = Date.now();
+    document.body.classList.remove('weg');
+    halt = 0;
+    tick();
+  }
+});
 setInterval(tick,400);tick();
 function diagZeigen(d){
   di.innerHTML = (!d.on
