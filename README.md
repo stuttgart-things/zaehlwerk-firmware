@@ -75,7 +75,7 @@ are looking at.
 
 | | |
 | --- | --- |
-| `task sink` | Receive the log, write a day folder with one JSON per game, serve the viewer on `:9001` |
+| `task sink` | Receive the log, write a day folder with one JSON per game, serve the viewer and the labelling pages on `:9001` |
 | `task sink:games` | Split a session into one JSON per game. `SESSION=…/sessions/<file>.jsonl` |
 | `task sink:export` | Zip one session with a summary beside it |
 | `task sink:mock` | Send a made-up session at the sink — no board needed |

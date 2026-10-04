@@ -214,23 +214,117 @@ Only crossings that decided a side are scored. One that was never counted has no
 side to be right or wrong about — counting those dragged a run with 15% wrong
 sides down to 40% before it was fixed.
 
+## Labelling
+
+The log says what the firmware decided; a label says what actually happened.
+Labels are written by the sink, on a person's say-so, into the same session
+file, and they point at ids — never at a stretch of time
+([ADR-0005](adr/0005-labels-are-append-only-records.md),
+[the schema](event-schema.md#labels--written-by-the-sink-never-by-the-firmware)).
+
+Open the viewer on a phone on the same network as the laptop —
+`http://<laptop>:9001`. Two pages:
+
+**During play: `/mark`.** Two large buttons, *Stimmt nicht* and *Stimmt*. Either
+one writes a `quick_mark` against the rally the newest live session is in at
+that moment, so nobody at the table has to know what a rally id is. A *Stimmt
+nicht* is an **open marker** until somebody says what was wrong.
+
+**After the rally: the timeline.** `/timeline?f=<session file>`, linked from
+the start page and from every session. Newest rally first, each with:
+
+- the point it ended in, and buttons to correct it: *Stimmt*, *Gehörte A*,
+  *Gehörte B*, *Kein Punkt*, *Ballwechsel nicht zu Ende*
+- every crossing that belongs to it — the discarded ones too, with their reason
+  — with a small curve where the event carries samples, and under
+  *korrigieren* the event correction and a *fehlender Aufsetzer* in front of it
+- a *fehlender Aufsetzer danach* after the last crossing
+- the labels standing on it, each with a ✕ to delete it
+
+Rallies with an open marker are drawn in red, and *offene Marker* in the filter
+row lists only those. The filter also selects by label value, which is the
+error type: everything labelled `crosstalk`, every point that was `no_point`.
+
+Names: the page shows who stood on each half **during that rally** — after a
+change of ends, *Gehörte A* is somebody else. What is stored is the half
+(`belongs_a`), never the name ([ADR-0006](adr/0006-the-firmware-owns-the-half-to-player-mapping.md)).
+
+Every form takes free text. The name in *Wer labelt?* is remembered by the
+browser and written as `author`.
+
+### What the sink does on top of the form
+
+- **Refuses what cannot be resolved.** A point, rally or event the file does not
+  hold, a value outside the vocabulary, a `missed_hit` without a position: the
+  page says why and nothing is written.
+- **Replaces instead of contradicting.** A second `point_correction` on the same
+  point — or a second `event_correction` on the same single event — supersedes
+  the first. Two standing labels on one point would count it twice, once each
+  way. The first stays in the file.
+- **Places a missing bounce.** `approx_t_us` is halfway between the two events
+  it was inserted between, or at the one neighbour it has.
+- **Numbers labels per file**, `l-1`, `l-2`, …
+- **Writes through the live writer.** While a session is still being recorded,
+  a label goes through the same buffered writer as the board's events, so it
+  can never land inside a half-written hit.
+
+## Labels derived from corrections at the table
+
+A point taken back or awarded by hand at the table — on the board's page, by a
+button, by radio — is a correction too, and it is worth a label. **The firmware
+still never writes one** (ADR-0005). It logs a `correction` event with the ids
+it refers to, and the sink derives the label from it
+([#57](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/57)). The
+rule, so that a derived label means the same thing every time:
+
+| The firmware logged | The sink writes |
+| --- | --- |
+| `correction` `undo` of point P | `point_correction` on P, `no_point` |
+| `correction` `award` for half S, directly after an undo of P, with no rally started in between | `point_correction` on P, `belongs_a` / `belongs_b`, **superseding** the label from the undo |
+| `correction` `award` for half S with no undo before it | `quick_mark` `wrong` on that rally — an open marker: the logic missed a point and somebody has to say why |
+
+And for every derived label:
+
+- `author` is `firmware:<source>` — `firmware:virtual`, `firmware:espnow` — and
+  `derived_from` is the id of the `correction` event
+- the correction's `tag` and `note` become the label's `note`
+- it is derived **once**, when the event arrives. A replay or an export reads
+  the labels that are in the file and derives nothing, so a session exported
+  twice does not grow twice the labels — `derived_from` is what makes a repeat
+  detectable
+- a person can supersede it like any other label; looking at the curve
+  afterwards usually knows more than the button press did
+
+Until #57 the firmware has no `correction` event: a manual point or an undo is a
+`point` with `reason: manual` or `undo` and the tag and note from the board's
+correction card, and nothing is derived from it.
+
 ## Export
 
 ```bash
-task sink:export SESSION=sessions/20260929-161010-e32c87dd.jsonl
+task sink:export SESSION=sink-data/2026-09-29/sessions/161010-e32c87dd.jsonl
 ```
 
 A zip with the raw file, `summary.json`, `summary.txt` and `labels.json` —
 the labels with their `supersedes` chains already resolved, while the raw file
 keeps every version ([ADR-0005](adr/0005-labels-are-append-only-records.md)).
+`labels.json` holds each standing label **exactly as it is stored**, every
+field included, so a `missed_hit` keeps its `between` and `approx_t_us`.
+
+The summary counts the standing labels per `kind:value` — the error types — and
+the open markers. Points are scored from their `point_correction`: a point is
+right when the label says `correct` or names the half it was given to anyway,
+and wrong otherwise. Points nobody labelled are not in that ratio; an
+unlabelled point is not a right one, it is one nobody looked at.
 The summary is rebuilt from the file rather than taken from the running sink, so
 it works on a session copied off a laptop weeks later.
 
 ## Limits worth knowing
 
-- **Labelling is not here yet** — that is
-  [#19](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/19). The
-  export already resolves label records if a file has them.
+- **No video-sync marker yet.** The `sync` type is in the schema, but neither
+  the board nor the sink sets one.
+- **The pages have no login.** Anybody on the network who can reach `:9001` can
+  label. It is a laptop at a table, not a service.
 - **The curves are sparse** until
   [#10](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/10):
   outside the peak window the sampler reads once per millisecond, so a

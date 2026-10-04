@@ -349,9 +349,18 @@ Events that fit in one datagram are sent whole, with no `chunk` field.
 | `event_correction` | `bounce_a`, `bounce_b`, `net`, `edge`, `bat_or_body`, `ghost`, `crosstalk` |
 | `missed_hit` | `a`, `b` — with `between: ["<event_id>", "<event_id>"]` and `approx_t_us` |
 
+`between` names the event before and the event after the missing bounce; one
+of them may be `""` when the bounce came first or last in its rally.
+`approx_t_us` is set by the sink, halfway between the two.
+
 An edit or a deletion is a **new** record with `supersedes` naming the earlier
 `label_id`; a deletion carries `value: null`. Nothing in the file is ever
 rewritten.
+
+`author` is whoever labelled, as typed on the page, and optional. A label the
+sink derived from a correction at the table carries `author:
+"firmware:<source>"` and `derived_from: "<event id>"` instead — the rule is in
+[the sink's documentation](log-sink.md#labels-derived-from-corrections-at-the-table).
 
 Labels say which half the ball was on, never a player name. The name is what
 the UI shows, resolved through the `sides` mapping of the surrounding `match`

@@ -13,22 +13,6 @@ import (
 	"time"
 )
 
-// Label is a record the sink writes on somebody's say-so, never the firmware.
-// Editing one appends a new record naming the one it replaces, so the file
-// keeps the whole history and the export resolves it (ADR-0005).
-type Label struct {
-	Type       string   `json:"type"`
-	LabelID    string   `json:"label_id"`
-	Kind       string   `json:"kind"`
-	Value      *string  `json:"value"`
-	PointID    string   `json:"point_id,omitempty"`
-	RallyID    string   `json:"rally_id,omitempty"`
-	EventIDs   []string `json:"event_ids,omitempty"`
-	Note       string   `json:"note,omitempty"`
-	Supersedes string   `json:"supersedes,omitempty"`
-	RecvAt     string   `json:"recv_at,omitempty"`
-}
-
 // replay rebuilds a summary from a stored file. The live sink has the same
 // numbers in memory, but an export has to work on a file somebody copied off a
 // laptop weeks later.
@@ -44,9 +28,9 @@ func replay(path string) (Summary, []Label, error) {
 		Reasons: map[string]uint64{}, Tags: map[string]uint64{},
 		Players: map[string]uint64{},
 		ByType:  map[string]uint64{}, RightByType: map[string]uint64{},
+		pointSides: map[string]string{},
 	}
 	var labels []Label
-	superseded := map[string]bool{}
 
 	sc := bufio.NewScanner(fh)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
@@ -60,6 +44,9 @@ func replay(path string) (Summary, []Label, error) {
 			continue
 		}
 		se.Records++
+		if se.ID == "" && env.SessionID != "" {
+			se.ID = env.SessionID
+		}
 
 		// The sink's own arrival time is the only wall clock in the file; the
 		// firmware has none. The first one is when the session started being
@@ -94,10 +81,8 @@ func replay(path string) (Summary, []Label, error) {
 		case "label":
 			var l Label
 			if json.Unmarshal(line, &l) == nil {
+				l.raw = append(json.RawMessage(nil), line...)
 				labels = append(labels, l)
-				if l.Supersedes != "" {
-					superseded[l.Supersedes] = true
-				}
 			}
 		default:
 			if !se.haveFirst {
@@ -113,16 +98,16 @@ func replay(path string) (Summary, []Label, error) {
 		return Summary{}, nil, err
 	}
 
-	live := labels[:0]
-	for _, l := range labels {
-		if !superseded[l.LabelID] && l.Value != nil {
-			live = append(live, l)
-		}
-	}
+	live := standingLabels(labels)
 
 	s := se.Summary()
+	s.countLabels(live, se.pointSides)
 	s.File = filepath.Base(path)
-	s.SessionID = strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	// The id the board gave the session, not the file name around it, which
+	// carries the time the sink first heard of it.
+	if s.SessionID == "" {
+		s.SessionID = strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	}
 	return s, live, nil
 }
 
@@ -177,9 +162,9 @@ func runExport(args []string) error {
 	}
 
 	// Labels that are still standing, with the superseded ones already resolved
-	// away. The raw file above still holds every version.
-	lj, _ := json.MarshalIndent(labels, "", "  ")
-	if err := add("labels.json", lj); err != nil {
+	// away. The raw file above still holds every version. Written as stored,
+	// not re-marshalled, so no field is lost on the way (#53).
+	if err := add("labels.json", rawLabels(labels)); err != nil {
 		return err
 	}
 

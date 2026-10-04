@@ -41,6 +41,9 @@ func (se *Session) count(raw []byte, typ string) {
 			if p.PlayerName != "" && p.Reason != "undo" {
 				se.Players[p.PlayerName]++
 			}
+			if p.PointID != "" && p.Reason != "undo" && se.pointSides != nil {
+				se.pointSides[p.PointID] = p.Side
+			}
 		}
 	case "rally":
 		se.Rallies++
@@ -75,6 +78,58 @@ type Summary struct {
 	MockAccuracy  float64           `json:"mock_accuracy"`
 	ByType        map[string]uint64 `json:"mock_hits_per_type"`
 	RightByType   map[string]uint64 `json:"mock_correct_per_type"`
+
+	// What people said about the session, from the labels still standing.
+	// Only an export fills these in: the live sink does not read labels back.
+	Labels         map[string]uint64 `json:"labels_per_value,omitempty"`
+	OpenMarks      uint64            `json:"open_quick_marks"`
+	PointsLabelled uint64            `json:"points_labelled"`
+	PointsRight    uint64            `json:"points_labelled_right"`
+	PointAccuracy  float64           `json:"point_accuracy"`
+}
+
+// countLabels adds the standing labels to a summary.
+//
+// A point counts as right when its correction says "correct", or names the
+// half it was given to anyway. Every other point correction — the other half,
+// no point, rally not over — is a point the logic got wrong. Points nobody
+// labelled are not in the ratio at all: an unlabelled point is not a right one,
+// it is one nobody looked at.
+//
+// A quick mark is open while its rally has no other label: somebody said
+// "wrong" during play and nobody has yet said what was wrong.
+func (s *Summary) countLabels(ls []Label, pointSides map[string]string) {
+	if len(ls) == 0 {
+		return
+	}
+	s.Labels = map[string]uint64{}
+	resolved := map[string]bool{}
+	for _, l := range ls {
+		s.Labels[l.Kind+":"+*l.Value]++
+		if l.Kind != "quick_mark" && l.RallyID != "" {
+			resolved[l.RallyID] = true
+		}
+		if l.Kind != "point_correction" {
+			continue
+		}
+		s.PointsLabelled++
+		switch *l.Value {
+		case "correct":
+			s.PointsRight++
+		case "belongs_a", "belongs_b":
+			if strings.EqualFold(strings.TrimPrefix(*l.Value, "belongs_"), pointSides[l.PointID]) {
+				s.PointsRight++
+			}
+		}
+	}
+	for _, l := range ls {
+		if l.Kind == "quick_mark" && *l.Value == "wrong" && !resolved[l.RallyID] {
+			s.OpenMarks++
+		}
+	}
+	if s.PointsLabelled > 0 {
+		s.PointAccuracy = float64(s.PointsRight) / float64(s.PointsLabelled)
+	}
 }
 
 func (se *Session) Summary() Summary {
@@ -169,6 +224,19 @@ func (s Summary) Text() string {
 		b.WriteString("  corrections by tag\n")
 		for _, k := range sortedKeys(s.Tags) {
 			fmt.Fprintf(&b, "    %-16s %d\n", k, s.Tags[k])
+		}
+	}
+	if s.PointsLabelled > 0 {
+		fmt.Fprintf(&b, "  labelled points: right on %d of %d (%.1f%%)\n",
+			s.PointsRight, s.PointsLabelled, 100*s.PointAccuracy)
+	}
+	if len(s.Labels) > 0 {
+		b.WriteString("  labels\n")
+		for _, k := range sortedKeys(s.Labels) {
+			fmt.Fprintf(&b, "    %-28s %d\n", k, s.Labels[k])
+		}
+		if s.OpenMarks > 0 {
+			fmt.Fprintf(&b, "    %-28s %d\n", "quick marks still open", s.OpenMarks)
 		}
 	}
 	if s.Intended > 0 {

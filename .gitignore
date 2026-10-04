@@ -12,6 +12,10 @@ secrets.ini
 .task/
 site/
 
+# The sink, built where it lives. A binary is built per machine, not
+# committed — one checked in was a 10 MB macOS arm64 file nobody else could run.
+tools/log-sink/log-sink
+
 # Recorded sessions
 sink-data/
 tools/log-sink/sessions/
