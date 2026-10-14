@@ -280,10 +280,12 @@ spelling; a fob that does not check in is debugged by its outcome.
 | `waiting` | a fob was read, the window is open. No half yet |
 | `busy` | a fob during play, refused on the board; nothing was sent |
 | `off` | a fob with no `ZW_API_URL`; nothing was sent |
+| `no_token` | a fob with no check-in token on the board; nothing was sent (#65) |
 | `ignored` | a fob while a request was out |
 | `expired` | nobody pressed within the window; the UID is gone |
 | `claimed` `unchanged` `replaced` `moved` `started` | zaehlwerk took it (200) |
 | `duplicate` | zaehlwerk had a higher `event_id` from this source; nothing changed |
+| `unauthorized` | zaehlwerk refused the token, or got none (401 or 403). Says nothing about the fob |
 | `unknown` | the fob belongs to nobody (404) |
 | `refused` | a match is running at zaehlwerk (409) |
 | `unavailable` | zaehlwerk could not ask Schmetterpause, or check-in is off there (503) |
@@ -293,6 +295,9 @@ spelling; a fob that does not check in is debugged by its outcome.
 | `no_wifi` | the board is not on a network; nothing was sent |
 | `no_answer` | on a network, but nobody answered, after `attempts` tries |
 | `ok` | 200 with an outcome this firmware does not know |
+
+Neither field nor outcome ever carries the check-in token; the log says
+whether one is set (a `note`), never what it is.
 
 `side` and `half` are there once a press named one: `side` the half as every
 other event writes it, `half` the token zaehlwerk was sent. `source`,

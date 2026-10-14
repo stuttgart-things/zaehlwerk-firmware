@@ -148,6 +148,12 @@ halves checked in and zaehlwerk starts the match
 While a rally is open, or a game stands between its first point and its end, a
 fob is refused at once and the press after it stays a point.
 
+**Only with zaehlwerk's token.** zaehlwerk takes a check-in only with its
+`CHECKIN_TOKEN` as a bearer ([#65](../../issues/65), zaehlwerk#113), so the
+board sends `Authorization: Bearer <token>` on every check-in. Points carry no
+token. Without one on the board no check-in is sent at all: startup and the page
+say so, and a fob gets "rejected".
+
 **The UID is never logged or stored.** Not on serial, not in the diagnostic log,
 not in NVS. It lives in RAM for the window and the one request. The log says
 `checkin`, the half and the outcome. Our own fobs only: MIFARE Classic 1K or NTAG.
@@ -181,7 +187,7 @@ not under the top.
 | Sending | on | on |
 | Checked in (`claimed`, `unchanged`, `replaced`, `moved`, `started`) | on, 2 s | |
 | Unknown fob (404) | | on, 2 s |
-| Refused: a match is running (409), play is going on here, or a `duplicate` | | blinks, 2 s |
+| Refused: a match is running (409), play is going on here, a `duplicate`, a wrong token (401/403) or none on the board | | blinks, 2 s |
 | Unavailable: zaehlwerk or Schmetterpause not answering (503, 5xx, no wifi), check-in off | | blinks fast, 2 s |
 | Nobody pressed in time | | two short blinks |
 
@@ -190,9 +196,38 @@ not under the top.
 | Build flag | Default | |
 | --- | --- | --- |
 | `ZW_API_URL` | empty | zaehlwerk-api, `http://10.0.0.5:8080`. Empty: check-in is off and a fob gets "unavailable". An IP or a DNS name; `.local` is not resolved |
+| `ZW_CHECKIN_TOKEN` | empty | zaehlwerk's `CHECKIN_TOKEN`. Seeds the board only while NVS holds none; see below |
 | `ZW_INGEST_SOURCE` | `ZW_DEVICE_ID` | the `source` of the ingest contract. The `event_id` behind it is kept in NVS |
 | `ZW_CHECKIN_WINDOW_MS` | `5000` | how long a fob waits for a press |
 | `ZW_FOB_CORE` | the core that does not sample | never `ZW_SENSOR_CORE`; the build fails if it is |
+
+### The token
+
+The token is kept like the wifi credentials, not like the OTA password: in NVS,
+set on the board's page. A released image is built in CI without `secrets.ini`
+and carries none, so this is how it gets one.
+
+- **On the page:** card "Check-in per Fob", paste the token, "Token speichern".
+  It applies at once, no restart. "Token loeschen" clears it.
+- **With curl**, from a variable so it stays out of the shell history:
+
+  ```bash
+  curl -4 -s -X POST --data-urlencode "token=$CHECKIN_TOKEN" http://zaehlwerk.local/checkin/token
+  curl -4 -s -X POST --data-urlencode "token=" http://zaehlwerk.local/checkin/token   # clear
+  ```
+
+- **From `secrets.ini`:** `-DZW_CHECKIN_TOKEN='"…"'` seeds a board whose NVS has
+  no token key. Once a token is set or cleared on the page, that wins; a cleared
+  one stays cleared until NVS is erased.
+
+**The token is never shown back and never logged.** The page and `/checkin` say
+`"token": true` or `false`, never the value, and the field is empty after
+saving. Serial and the diagnostic log say whether one is set and where it came
+from, never what it is. A token with a space, a line break or a character
+outside printable ASCII is refused rather than stored; at most 256 characters.
+
+The board's page has no login, as for the wifi credentials: anybody on the
+network can set or clear the token, but nobody can read it back.
 
 ### Until the buttons exist
 
@@ -200,7 +235,7 @@ The press is meant to come from a paired ESP-NOW button (#58, #59), and neither
 exists yet. Until then the board's page stands in for one:
 
 ```bash
-curl -4 -s 'http://zaehlwerk.local/checkin'           # on, reader, LED, last outcome
+curl -4 -s 'http://zaehlwerk.local/checkin'           # on, api, token set, reader, LED, last outcome
 curl -4 -s 'http://zaehlwerk.local/checkin?press=A'   # a press at half A
 ```
 

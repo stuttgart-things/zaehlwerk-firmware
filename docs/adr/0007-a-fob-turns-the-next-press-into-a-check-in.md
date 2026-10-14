@@ -59,6 +59,16 @@ The log says `checkin`, the half and the outcome. The functions that build log
 lines take no UID, so there is nothing to forget to leave out. Whether a fob is
 known is decided by Schmetterpause; the board holds no list of fobs.
 
+**Only with zaehlwerk's token**
+([#65](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/65)).
+zaehlwerk takes a check-in only with its `CHECKIN_TOKEN` as a bearer, because a
+UID is no secret and a check-in names a player. The board keeps the token the
+way it keeps the wifi credentials: in NVS, set on its page, seeded from
+`secrets.ini` only while NVS has none, so a released image can be given one. It
+follows the UID's rule: never shown back, never logged. Without one the board
+sends no check-in, and a fob is rejected at once rather than held for a press.
+A 401 or 403 is the token, not the fob, and reads as rejected, not unknown.
+
 **The reader is polled on the core that does not sample** (ADR-0003). Which core
 that is follows `ZW_SENSOR_CORE`, and a build that puts the two together does not
 compile.
