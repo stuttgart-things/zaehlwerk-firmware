@@ -24,6 +24,7 @@ nav:
       - 0004 Diagnostic log over UDP: adr/0004-diagnostic-log-over-udp-to-a-sink.md
       - 0005 Labels are append-only records: adr/0005-labels-are-append-only-records.md
       - 0006 The firmware owns the half to player mapping: adr/0006-the-firmware-owns-the-half-to-player-mapping.md
+      - 0007 A fob turns the next press into a check-in: adr/0007-a-fob-turns-the-next-press-into-a-check-in.md
 
 plugins:
   - techdocs-core
