@@ -304,6 +304,41 @@ Also only with a zaehlwerk address.
 `adopted` is what explains a score that changed with no `point` before it:
 an undo on the phone, a set won at zaehlwerk, a point the board did not hear.
 
+## `checkin` — a fob, a press, and what zaehlwerk said
+
+One event per step of a check-in by fob
+([ADR-0007](adr/0007-a-fob-turns-the-next-press-into-a-check-in.md)).
+**There is no field for the card.** The UID never reaches this log, in any
+spelling; a fob that does not check in is debugged by its outcome.
+
+```json
+{ "type": "checkin", "outcome": "claimed", "side": "A", "half": "left",
+  "source": "piezo-1", "event_id": 43, "http": 200, "attempts": 1 }
+```
+
+| `outcome` | |
+| --- | --- |
+| `waiting` | a fob was read, the window is open. No half yet |
+| `busy` | a fob during play, refused on the board; nothing was sent |
+| `off` | a fob with no `ZW_API_URL`; nothing was sent |
+| `ignored` | a fob while a request was out |
+| `expired` | nobody pressed within the window; the UID is gone |
+| `claimed` `unchanged` `replaced` `moved` `started` | zaehlwerk took it (200) |
+| `duplicate` | zaehlwerk had a higher `event_id` from this source; nothing changed |
+| `unknown` | the fob belongs to nobody (404) |
+| `refused` | a match is running at zaehlwerk (409) |
+| `unavailable` | zaehlwerk could not ask Schmetterpause, or check-in is off there (503) |
+| `failed` | 500 |
+| `bad_request` | 400: a request this firmware built and zaehlwerk would not read |
+| `http_error` | any other status |
+| `no_wifi` | the board is not on a network; nothing was sent |
+| `no_answer` | on a network, but nobody answered, after `attempts` tries |
+| `ok` | 200 with an outcome this firmware does not know |
+
+`side` and `half` are there once a press named one: `side` the half as every
+other event writes it, `half` the token zaehlwerk was sent. `source`,
+`event_id`, `http` and `attempts` are there once a request was made.
+
 ## `sync` — a marker for lining up a phone video
 
 ```json
@@ -426,3 +461,5 @@ The ingest `event_id` is the one that is not like the others: it is a plain
 counter the API deduplicates on, it is per source rather than per session, and
 it has to survive a restart or every reboot replays point one
 ([zaehlwerk ADR-0002](https://github.com/stuttgart-things/zaehlwerk/blob/main/docs/adr/0002-idempotent-ingest-contract.md)).
+Check-in by fob is the first thing that sends one. The counter is in NVS
+(namespace `ingest`, key `event_id`) and is written before each request goes.
