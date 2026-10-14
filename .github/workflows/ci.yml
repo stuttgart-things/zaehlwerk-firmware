@@ -137,7 +137,9 @@ jobs:
           hdr = pathlib.Path("include/config.h").read_text()
 
           # These must be empty, or a published binary carries somebody's network.
-          for name in ("ZW_STA_PASS", "ZW_OTA_PASS", "ZW_STA_SSID"):
+          # ZW_CHECKIN_TOKEN too (#65): a released image is given its token
+          # through the board's page, never in the binary.
+          for name in ("ZW_STA_PASS", "ZW_OTA_PASS", "ZW_STA_SSID", "ZW_CHECKIN_TOKEN"):
               m = re.search(rf'#define\s+{name}\s+"([^"]*)"', hdr)
               if m is None or m.group(1) != "":
                   sys.exit(f"{name} has a baked-in default: {m and m.group(1)!r}")
