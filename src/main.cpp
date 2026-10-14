@@ -858,6 +858,26 @@ void setup() {
     }
     server.send(200, "application/json", fob::stateJson());
   });
+  // zaehlwerk's CHECKIN_TOKEN (#65). POST, like /wifi: a token does not belong
+  // in a URL. `token=` empty clears it. The answer says whether one is set and
+  // never echoes it, and neither does the log line.
+  server.on("/checkin/token", HTTP_POST, []{
+    if (!server.hasArg("token")) {
+      server.send(400, "text/plain", "token fehlt\n");
+      return;
+    }
+    String t = server.arg("token");
+    const ingest::TokenChange c = ingest::setCheckinToken(t);
+    if (t.length()) memset(&t[0], 0, t.length());
+    if (c == ingest::TokenChange::Refused) {
+      server.send(400, "text/plain",
+                  "Nicht gespeichert: 1 bis 256 Zeichen, ohne Leerzeichen und Umlaute.\n");
+      return;
+    }
+    Serial.println(c == ingest::TokenChange::Set ? "[checkin] token set on the page"
+                                                 : "[checkin] token cleared on the page");
+    server.send(200, "application/json", fob::stateJson());
+  });
   server.on("/net", handleNet);
   server.on("/wifi", HTTP_POST, handleWifi);
   server.on("/punkt", []{

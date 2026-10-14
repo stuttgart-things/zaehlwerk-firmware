@@ -32,8 +32,9 @@ void setBusy(bool busy);
 // Belongs next to diag::tick().
 void tick();
 
-// For /checkin: whether check-in is on, whether a reader answers, what the LED
-// shows and what the last check-in came to. Never the UID.
+// For /checkin: whether check-in is on, whether there is an API and a token,
+// whether a reader answers, what the LED shows and what the last check-in came
+// to. Never the UID, and never the token, only whether one is set.
 String stateJson();
 
 }  // namespace fob
