@@ -108,7 +108,8 @@ void send(checkin::Request r) {
   uint8_t attempts = 0;
   while (attempts < ATTEMPTS) {
     attempts++;
-    status = ingest::post("/ingest/checkin", body, answer, HTTP_TIMEOUT_MS);
+    status = ingest::post("/ingest/checkin", body, answer, HTTP_TIMEOUT_MS,
+                          ingest::Auth::Checkin);
     if (!checkin::worthRetrying(status)) break;
     vTaskDelay(pdMS_TO_TICKS(BACKOFF_MS * attempts));
   }
@@ -181,17 +182,15 @@ void task(void *) {
     } else {
       checkin::Uid uid{};
       if (readCard(uid)) {
-        checkin::Signal s;
+        const checkin::Setup setup =
+            checkin::setupOf(ingest::configured(), ingest::haveCheckinToken());
+        const char *outcome;
         {
           Guard g;
-          window.fob(uid, busy_, ingest::configured(), now);
-          s = window.signal(now);
+          outcome = window.fob(uid, busy_, setup, now);
         }
         uid.clear();
-        if (s == checkin::Signal::Waiting)          say(' ', "waiting");
-        else if (s == checkin::Signal::Rejected)    say(' ', "busy");
-        else if (s == checkin::Signal::Unavailable) say(' ', "off");
-        else                                        say(' ', "ignored");
+        say(' ', outcome);
       } else if (now - lastInit >= REINIT_MS) {
         // A reader that was there can go: a loose wire, a brown-out on the
         // module. Looked at now and then, not every poll.
@@ -237,6 +236,17 @@ bool press(char half) {
 void setBusy(bool busy) { busy_ = busy; }
 
 void tick() {
+  // Whether check-in can send anything, said once at the start and again when
+  // it changes on the page (#65). Whether, never what: the token stays in
+  // ingest.cpp.
+  static int tokenReported = -1;  // nothing said yet
+  const int token = ingest::haveCheckinToken() ? 1 : 0;
+  if (token != tokenReported) {
+    if (token) diag::note("info", "check-in token set");
+    else       diag::note("warn", "no check-in token — no check-in is sent; set one on the board's page");
+    tokenReported = token;
+  }
+
   static uint8_t reported = 0xFF;  // nothing said yet
   const uint8_t v = readerVersion_;
   if (v != reported) {
@@ -261,16 +271,10 @@ String stateJson() {
     Guard g;
     s = window.signal(millis());
   }
-  const char *half = checkin::halfToken(last_.half);
-  String j = String("{\"on\":") + (ingest::configured() ? "true" : "false");
-  j += String(",\"reader\":") + (readerVersion_ ? "true" : "false");
-  j += String(",\"signal\":\"") + checkin::signalName(s) + "\"";
-  j += String(",\"window_ms\":") + ZW_CHECKIN_WINDOW_MS;
-  j += String(",\"source\":\"") + ingest::source() + "\"";
-  j += String(",\"last\":{\"outcome\":\"") + last_.outcome + "\"";
-  if (half) j += String(",\"half\":\"") + last_.half + "\"";
-  j += "}}";
-  return j;
+  const checkin::Status st{ingest::configured(), ingest::haveCheckinToken(),
+                           readerVersion_ != 0, s, ZW_CHECKIN_WINDOW_MS, ingest::source(),
+                           last_.outcome, last_.half};
+  return String(checkin::statusJson(st).c_str());
 }
 
 }  // namespace fob

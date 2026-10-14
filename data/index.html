@@ -199,6 +199,20 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   </div>
 </div>
 
+<div class="card"><h2>Check-in per Fob</h2>
+  <div class="ni" id="ci">…</div>
+  <div class="net" style="margin-top:10px">
+    <label style="margin:0">Token von zaehlwerk (<code>CHECKIN_TOKEN</code>) &mdash;
+      wird nie wieder angezeigt</label>
+    <input type="password" id="ct" autocomplete="off" placeholder="Token">
+    <div class="row">
+      <button onclick="tokenSpeichern(0)">Token speichern</button>
+      <button class="warn" onclick="tokenSpeichern(1)">Token loeschen</button>
+    </div>
+    <div class="msg" id="cm"></div>
+  </div>
+</div>
+
 <div class="card"><h2>Netz</h2>
   <div class="ni" id="ni">…</div>
   <div class="net" style="margin-top:10px">
@@ -470,6 +484,33 @@ function sim(t){
     mockZeigen(d); tick();
   }).catch(()=>{});
 }
+// Check-in by fob (#63, #65). The board says whether a token is set, never
+// which one: the field stays empty after saving, on purpose.
+function checkinZeigen(c){
+  let z;
+  if(!c.api) z='<span class="warn">Kein zaehlwerk eingetragen (ZW_API_URL) &mdash; Check-in ist aus.</span>';
+  else if(!c.token) z='<span class="warn">Kein Token gesetzt &mdash; es wird kein Check-in gesendet.</span>';
+  else z='Token gesetzt &middot; Check-in ist <b>an</b>';
+  z+='<br>Leser '+(c.reader?'<b>antwortet</b>':'<span class="warn">antwortet nicht</span>');
+  if(c.last&&c.last.outcome)
+    z+='<br>Zuletzt <b>'+c.last.outcome+'</b>'+(c.last.half?' an Haelfte <b>'+c.last.half+'</b>':'');
+  ci.innerHTML=z;
+}
+function checkinLaden(){
+  fetch('/checkin').then(r=>r.json()).then(checkinZeigen).catch(()=>{});
+}
+function tokenSpeichern(loeschen){
+  const t=loeschen?'':ct.value.trim();
+  if(!loeschen&&!t){cm.textContent='Erst einen Token eingeben.';return}
+  if(loeschen&&!confirm('Token loeschen? Danach wird kein Check-in mehr gesendet.'))return;
+  fetch('/checkin/token',{method:'POST',body:new URLSearchParams({token:t})})
+    .then(r=>r.ok?r.json().then(c=>{
+        ct.value='';checkinZeigen(c);
+        cm.textContent=loeschen?'Token geloescht. Es wird kein Check-in mehr gesendet.'
+                                :'Token gespeichert. Er gilt ab sofort.';
+      }):r.text().then(m=>{cm.textContent=m}))
+    .catch(()=>{cm.textContent='Board nicht erreicht.'});
+}
 function netLaden(){
   fetch('/net').then(r=>r.json()).then(n=>{
     ni.innerHTML =
@@ -512,6 +553,7 @@ function senden(){
   x.send(fd);
 }
 netLaden();
+checkinLaden();
 spielerLaden();
 diagLaden();
 setInterval(diagLaden,5000);

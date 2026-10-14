@@ -84,6 +84,14 @@
 #define ZW_API_URL ""
 #endif
 
+// zaehlwerk's CHECKIN_TOKEN, sent as a bearer on every check-in (#65). This
+// only seeds the board while NVS holds none: once a token is set or cleared on
+// the board's page, that wins. Empty here, so a released image carries none and
+// is given one through the page. Without a token no check-in is sent.
+#ifndef ZW_CHECKIN_TOKEN
+#define ZW_CHECKIN_TOKEN ""
+#endif
+
 // The `source` of the ingest contract (zaehlwerk ADR-0002). The counter behind
 // `event_id` is per source and kept in NVS, so two boards need two names.
 #ifndef ZW_INGEST_SOURCE
