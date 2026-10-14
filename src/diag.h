@@ -107,6 +107,11 @@ void point(uint32_t pointId, uint32_t rallyId, const String &reason,
 // every later point resolvable.
 void match(const char *phase, const String &nameA, const String &nameB,
            int sideAPlayer, int sideBPlayer, int setNumber);
+// A check-in by fob (#63): the half, if a press named one, and how it came out.
+// There is no parameter for the card on purpose — the UID never reaches this log
+// (ADR-0007), and a signature without it is the way to keep it that way.
+void checkin(char half, const char *outcome, const char *source, uint32_t eventId,
+             int http, uint8_t attempts);
 void param(const char *name, const String &from, const String &to, const char *by);
 void note(const char *level, const String &text);
 
