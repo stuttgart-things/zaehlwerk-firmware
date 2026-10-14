@@ -41,7 +41,9 @@
 
 #include "config.h"
 #include "diag.h"
+#include "fob.h"
 #include "game.h"
+#include "ingest.h"
 #include "mock.h"
 #include "net.h"
 #include "ota.h"
@@ -90,8 +92,8 @@ QueueHandle_t queue;
 // moves to core 1, where nothing else runs. Core 1's idle task is not watched by
 // the watchdog in this build, so a tight loop there is survivable; on core 0 it
 // would starve wifi and lwIP.
-// ZW_SENSOR_CORE is in include/config.h, because the link to zaehlwerk-api has
-// to know which core to stay off.
+// ZW_SENSOR_CORE is in include/config.h, because the link to zaehlwerk-api and
+// the fob reader have to know which core to stay off.
 // How many readings between one tick of sleep. A bare taskYIELD() here starved
 // core 1's idle task: the image booted, confirmed itself valid after the ten
 // second probation and then crash-looped every thirty-five seconds — past the
@@ -477,6 +479,14 @@ const char *zurueck(const String &marke = "", const String &kommentar = "") {
   return ballwechselVerworfen ? "rally+point" : "point";
 }
 
+// Whether play is going on, as far as this board can tell: a rally open, or a
+// game between its first point and its last. A fob is then refused, so the next
+// press stays a point instead of being taken as a check-in (ADR-0007). Whether
+// a match is running at zaehlwerk is zaehlwerk's to say, and it does, with a
+// 409 — this only keeps the board from eating a point while it asks.
+bool spielLaeuft() {
+  return rally.length() > 0 || (!vorbei && (punkteA > 0 || punkteB > 0));
+}
 void neuesSpiel() {
   punkteA = punkteB = 0; vorbei = false; sieger = ' ';
   aufschlag = ersterAufschlag; rally = ""; logAnzahl = 0; verlaufN = 0;
@@ -795,6 +805,10 @@ void setup() {
   // The link to zaehlwerk-api, on the core that does not sample. Without an
   // address it starts nothing (ADR-0008).
   reporter::begin();
+  // The fob reader, on the core that does not sample (ADR-0003, ADR-0007).
+  // After the reporter: that is where ingest::begin() reads the address and
+  // the counter both of them share.
+  fob::begin();
 
   server.on("/", []{
     File f = LittleFS.open("/index.html", "r");
@@ -829,6 +843,20 @@ void setup() {
     String msg;
     const bool ok = reporter::setUrl(server.arg("url"), msg);
     server.send(ok ? 200 : 400, "text/plain", msg + "\n");
+  });
+  // Check-in by fob. ?press=A or ?press=B stands in for a paired button until the
+  // ESP-NOW path of #58 exists, and does only that: with no fob waiting it is not
+  // a point, just a press that came to nothing.
+  server.on("/checkin", []{
+    if (server.hasArg("press")) {
+      const String s = server.arg("press");
+      const bool taken = (s == "A" || s == "B") && fob::press(s[0]);
+      server.send(200, "application/json",
+                  String("{\"taken\":") + (taken ? "true" : "false") +
+                  ",\"checkin\":" + fob::stateJson() + "}");
+      return;
+    }
+    server.send(200, "application/json", fob::stateJson());
   });
   server.on("/net", handleNet);
   server.on("/wifi", HTTP_POST, handleWifi);
@@ -1049,6 +1077,8 @@ void loop() {
   mock::tick();
   diag::tick();
   reporter::tick(zwUebernehmen, mock::on());
+  fob::setBusy(spielLaeuft());
+  fob::tick();
   ota::handle();
   ota::tick(startWarSauber());
 

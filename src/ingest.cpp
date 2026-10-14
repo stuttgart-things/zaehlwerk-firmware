@@ -71,8 +71,8 @@ void loadUrl() {
   }
 }
 
-// One client per scheme, kept between requests: the task is the only caller,
-// and a TLS handshake (RSA-2048 leaf, ECDSA intermediate and root, ECDHE) is
+// One client per scheme, kept between requests: the report task and the fob
+// reader take turns on it behind requestLock_, and a TLS handshake (RSA-2048 leaf, ECDSA intermediate and root, ECDHE) is
 // the expensive part of a request on an ESP32, in time and in heap. With the
 // connection kept open, a board that polls every two seconds does it once.
 HTTPClient http_;
@@ -80,6 +80,9 @@ WiFiClient plain_;
 WiFiClientSecure *secure_ = nullptr;
 String connectedTo_;  // the base URL the open connection belongs to
 int lastTlsError_ = 0;
+// Held for a whole request, so a check-in waits for a point in flight rather
+// than sharing its connection. Never taken by the sampler or by loop().
+SemaphoreHandle_t requestLock_ = nullptr;
 
 void closeAll() {
   plain_.stop();
@@ -197,9 +200,19 @@ int request(const char *method, const char *path, const std::string *body, std::
   return code < -1 ? report::TLS_FAILED : report::NO_ANSWER;
 }
 
+int locked(const char *method, const char *path, const std::string *body, std::string &answer,
+           uint32_t timeoutMs) {
+  if (!requestLock_) return report::NO_ANSWER;  // begin() has not run
+  xSemaphoreTake(requestLock_, portMAX_DELAY);
+  const int status = request(method, path, body, answer, timeoutMs);
+  xSemaphoreGive(requestLock_);
+  return status;
+}
+
 }  // namespace
 
 void begin() {
+  if (!requestLock_) requestLock_ = xSemaphoreCreateMutex();
   Preferences p;
   if (p.begin(NVS_NAMESPACE, true)) {
     lastEventId_ = p.isKey(KEY_EVENT_ID) ? p.getUInt(KEY_EVENT_ID, 0) : 0;
@@ -316,11 +329,11 @@ bool clockSet() {
 }
 
 int get(const char *path, std::string &answer, uint32_t timeoutMs) {
-  return request("GET", path, nullptr, answer, timeoutMs);
+  return locked("GET", path, nullptr, answer, timeoutMs);
 }
 
 int post(const char *path, const std::string &body, std::string &answer, uint32_t timeoutMs) {
-  return request("POST", path, &body, answer, timeoutMs);
+  return locked("POST", path, &body, answer, timeoutMs);
 }
 
 }  // namespace ingest

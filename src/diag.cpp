@@ -421,6 +421,19 @@ void link(const char *phase, const char *reason, const char *matchId, int http, 
   emitNow("link", f);
 }
 
+void checkin(char half, const char *outcome, const char *source, uint32_t eventId,
+             int http, uint8_t attempts) {
+  String f = String(",\"outcome\":\"") + outcome + "\"";
+  if (half == 'A' || half == 'B')
+    f += String(",\"side\":\"") + half + "\",\"half\":\"" +
+         (half == 'A' ? "left" : "right") + "\"";
+  if (eventId) {
+    f += String(",\"source\":\"") + esc(source) + "\",\"event_id\":" + eventId;
+    f += String(",\"http\":") + http + ",\"attempts\":" + attempts;
+  }
+  emitNow("checkin", f);
+}
+
 void param(const char *name, const String &from, const String &to, const char *by) {
   emitNow("param", String(",\"name\":\"") + name + "\",\"from\":\"" + esc(from) +
                        "\",\"to\":\"" + esc(to) + "\",\"by\":\"" + by + "\"");
