@@ -69,8 +69,34 @@ struct Request {
 std::string requestBody(const char *source, const Request &r);
 
 // Statuses that are not HTTP: the request never reached anybody.
+const int NO_TOKEN = -3;   // no CHECKIN_TOKEN on the board, so nothing was sent (#65)
 const int NO_WIFI = -2;    // the board is not on a network that leads anywhere
 const int NO_ANSWER = -1;  // on a network, but no answer: refused, timed out
+
+// zaehlwerk's CHECKIN_TOKEN (#65). The hub sends it as a bearer on every
+// check-in, and zaehlwerk takes no check-in without it (zaehlwerk#113).
+//
+// Like the UID, it is a thing this code holds and hands on, never a thing it
+// says. The only function here that sees it is authorization(), which builds
+// the header; nothing that builds a log line or the page's JSON takes it.
+//
+// What the board accepts as one: printable ASCII with no space, 1 to
+// TOKEN_MAX characters. A token copied with a newline or a space on the end is
+// refused rather than stored, and nothing with a CR or LF in it ever reaches a
+// header.
+const size_t TOKEN_MAX = 256;
+bool tokenUsable(const std::string &token);
+// The value of the Authorization header: "Bearer <token>".
+std::string authorization(const std::string &token);
+
+// Whether a fob can be checked in at all. Decided before a window opens, so a
+// board that could not send the request does not take the press either.
+enum class Setup {
+  Ready,
+  NoApi,    // no ZW_API_URL: nowhere to send it
+  NoToken,  // no CHECKIN_TOKEN: zaehlwerk would refuse it (#65)
+};
+Setup setupOf(bool haveApi, bool haveToken);
 
 // Whether to send the same request again. Only when nobody answered: an answer,
 // whatever it says, is what a retry would get back again (ADR-0002), and a 503
@@ -85,8 +111,24 @@ struct Verdict {
 };
 Verdict judge(int status, const std::string &body);
 
-// The line for serial. Takes no UID, by construction: there is nothing to leak.
+// The line for serial. Takes no UID and no token, by construction: there is
+// nothing to leak.
 std::string logLine(char half, const char *outcome, uint32_t eventId, int status);
+
+// What /checkin answers, for the page and for curl. Whether a token is set is a
+// bool here, so the JSON cannot carry the token itself (#65); there is no field
+// for the UID either.
+struct Status {
+  bool api;              // ZW_API_URL is set
+  bool token;            // a CHECKIN_TOKEN is set
+  bool reader;           // an RC522 answers
+  Signal signal;         // what the LED shows
+  uint32_t windowMs;
+  const char *source;
+  const char *lastOutcome;  // "" before the first
+  char lastHalf;            // 'A', 'B' or ' '
+};
+std::string statusJson(const Status &s);
 
 // The window between a fob and a press, and what the LED shows around it.
 //
@@ -101,10 +143,14 @@ class Window {
   uint32_t lastEventId() const { return lastEventId_; }
 
   // A fob was read. `busy`: the firmware knows play is going on, so a fob does
-  // nothing and the next press stays a point. `enabled`: there is a zaehlwerk
-  // to ask at all. A fob while one is already waiting replaces it and starts
-  // the window again; a fob while a request is out is ignored.
-  void fob(const Uid &uid, bool busy, bool enabled, uint32_t now);
+  // nothing and the next press stays a point. `setup`: whether a request could
+  // be sent at all; anything but Ready and the fob is not held. A fob while one
+  // is already waiting replaces it and starts the window again; a fob while a
+  // request is out is ignored.
+  //
+  // Returns the outcome for the log: "waiting", "busy", "off" (no API),
+  // "no_token" or "ignored".
+  const char *fob(const Uid &uid, bool busy, Setup setup, uint32_t now);
 
   // A press of a paired button. true: it is a check-in, the request is ready in
   // take(), and the caller must not score it. false: it is whatever it would

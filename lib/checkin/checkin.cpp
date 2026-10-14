@@ -76,6 +76,21 @@ std::string requestBody(const char *source, const Request &r) {
 
 bool worthRetrying(int status) { return status == NO_ANSWER; }
 
+bool tokenUsable(const std::string &token) {
+  if (token.empty() || token.size() > TOKEN_MAX) return false;
+  for (const char c : token)
+    if (c < 0x21 || c > 0x7E) return false;
+  return true;
+}
+
+std::string authorization(const std::string &token) { return "Bearer " + token; }
+
+Setup setupOf(bool haveApi, bool haveToken) {
+  if (!haveApi) return Setup::NoApi;
+  if (!haveToken) return Setup::NoToken;
+  return Setup::Ready;
+}
+
 namespace {
 
 // The outcomes zaehlwerk answers with (its README, "Check-in per half"). Read
@@ -100,6 +115,8 @@ const char *outcomeIn(const std::string &body) {
 }  // namespace
 
 Verdict judge(int status, const std::string &body) {
+  // Not sent at all: the token was cleared between the press and the request.
+  if (status == NO_TOKEN) return {"no_token", Signal::Rejected};
   if (status == NO_WIFI) return {"no_wifi", Signal::Unavailable};
   if (status < 100) return {"no_answer", Signal::Unavailable};
 
@@ -111,6 +128,12 @@ Verdict judge(int status, const std::string &body) {
       // the same id is not a duplicate; it gets the first answer again.
       if (said && strcmp(said, "duplicate") == 0) return {said, Signal::Rejected};
       return {said ? said : "ok", Signal::CheckedIn};
+    case 401:
+    case 403:
+      // The token is missing or not zaehlwerk's (#65). zaehlwerk answers before
+      // it reads the body, so this says nothing about the fob, and the LED must
+      // not say "unknown".
+      return {"unauthorized", Signal::Rejected};
     case 404:
       return {"unknown", Signal::Unknown};
     case 409:
@@ -144,6 +167,33 @@ std::string logLine(char half, const char *outcome, uint32_t eventId, int status
   return line;
 }
 
+std::string statusJson(const Status &s) {
+  const char *half = halfToken(s.lastHalf);
+  std::string j = "{\"on\":";
+  j += s.api && s.token ? "true" : "false";
+  j += ",\"api\":";
+  j += s.api ? "true" : "false";
+  j += ",\"token\":";
+  j += s.token ? "true" : "false";
+  j += ",\"reader\":";
+  j += s.reader ? "true" : "false";
+  j += ",\"signal\":\"";
+  j += signalName(s.signal);
+  j += "\",\"window_ms\":" + std::to_string(s.windowMs);
+  j += ",\"source\":\"";
+  j += s.source ? s.source : "";
+  j += "\",\"last\":{\"outcome\":\"";
+  j += s.lastOutcome ? s.lastOutcome : "";
+  j += "\"";
+  if (half) {
+    j += ",\"half\":\"";
+    j += s.lastHalf;
+    j += "\"";
+  }
+  j += "}}";
+  return j;
+}
+
 Window::Window(uint32_t windowMs, uint32_t showMs) : windowMs_(windowMs), showMs_(showMs) {}
 
 void Window::show(Signal s, uint32_t now) {
@@ -152,16 +202,29 @@ void Window::show(Signal s, uint32_t now) {
   since_ = now;
 }
 
-void Window::fob(const Uid &uid, bool busy, bool enabled, uint32_t now) {
-  if (state_ == State::Ready || state_ == State::Sending || uid.empty()) return;
+const char *Window::fob(const Uid &uid, bool busy, Setup setup, uint32_t now) {
+  if (state_ == State::Ready || state_ == State::Sending || uid.empty()) return "ignored";
   uid_.clear();
   // Refused before anything is kept: a fob during play is not held for a
   // window, so the press after it is a point like any other.
-  if (busy) return show(Signal::Rejected, now);
-  if (!enabled) return show(Signal::Unavailable, now);
+  if (busy) {
+    show(Signal::Rejected, now);
+    return "busy";
+  }
+  if (setup == Setup::NoApi) {
+    show(Signal::Unavailable, now);
+    return "off";
+  }
+  // Nothing would be sent, so nothing is held (#65). Rejected, not unknown:
+  // the fob may be fine, the board is not allowed to ask.
+  if (setup == Setup::NoToken) {
+    show(Signal::Rejected, now);
+    return "no_token";
+  }
   uid_ = uid;
   state_ = State::Waiting;
   since_ = now;
+  return "waiting";
 }
 
 bool Window::press(char half, uint32_t now) {
