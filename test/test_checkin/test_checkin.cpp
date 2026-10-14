@@ -9,6 +9,7 @@
 
 using checkin::Lights;
 using checkin::Request;
+using checkin::Setup;
 using checkin::Signal;
 using checkin::Uid;
 using checkin::Window;
@@ -21,6 +22,7 @@ void setUp() {}
 void tearDown() {}
 
 static const uint32_t WINDOW = 5000;
+static const Setup READY = Setup::Ready;
 
 static Uid fob() {
   Uid u{};
@@ -47,7 +49,7 @@ static bool holdsNoUid(const Uid &u) {
 
 static void a_fob_then_a_press_is_a_check_in_at_that_half() {
   Window w(WINDOW);
-  w.fob(fob(), false, true, 1000);
+  w.fob(fob(), false, READY, 1000);
   TEST_ASSERT_TRUE(w.waiting());
   ASSERT_SIGNAL(Signal::Waiting, w.signal(1000));
 
@@ -69,7 +71,7 @@ static void a_press_with_no_fob_is_not_a_check_in() {
 
 static void only_the_first_press_is_taken() {
   Window w(WINDOW);
-  w.fob(fob(), false, true, 0);
+  w.fob(fob(), false, READY, 0);
   TEST_ASSERT_TRUE(w.press('A', 100));
   // The other player's press a moment later is a press, not a second check-in
   // with the same card.
@@ -80,7 +82,7 @@ static void only_the_first_press_is_taken() {
 
 static void no_press_within_the_window_drops_the_fob() {
   Window w(WINDOW);
-  w.fob(fob(), false, true, 1000);
+  w.fob(fob(), false, READY, 1000);
   TEST_ASSERT_FALSE(w.expire(1000 + WINDOW - 1));
   TEST_ASSERT_TRUE(w.expire(1000 + WINDOW));
   TEST_ASSERT_FALSE(w.expire(1000 + WINDOW + 1));  // said once, not every tick
@@ -91,7 +93,7 @@ static void no_press_within_the_window_drops_the_fob() {
 
 static void a_late_press_is_not_a_check_in_even_before_the_expiry_is_noticed() {
   Window w(WINDOW);
-  w.fob(fob(), false, true, 1000);
+  w.fob(fob(), false, READY, 1000);
   TEST_ASSERT_FALSE(w.press('A', 1000 + WINDOW));
   TEST_ASSERT_FALSE(w.ready());
   ASSERT_SIGNAL(Signal::Expired, w.signal(1000 + WINDOW));
@@ -100,17 +102,17 @@ static void a_late_press_is_not_a_check_in_even_before_the_expiry_is_noticed() {
 static void the_window_survives_the_millis_wrap() {
   Window w(WINDOW);
   const uint32_t nearWrap = 0xFFFFFFFFu - 1000;
-  w.fob(fob(), false, true, nearWrap);
+  w.fob(fob(), false, READY, nearWrap);
   TEST_ASSERT_FALSE(w.expire(nearWrap + 2000));  // wrapped past zero
   TEST_ASSERT_TRUE(w.press('A', nearWrap + 2000));
 }
 
 static void a_second_fob_replaces_the_first_and_starts_the_window_again() {
   Window w(WINDOW);
-  w.fob(fob(), false, true, 0);
+  w.fob(fob(), false, READY, 0);
   Uid other = fob();
   other.bytes[3] = 0x99;
-  w.fob(other, false, true, 4000);
+  w.fob(other, false, READY, 4000);
   TEST_ASSERT_FALSE(w.expire(WINDOW + 100));  // the first window would be over
   TEST_ASSERT_TRUE(w.press('A', WINDOW + 100));
   TEST_ASSERT_EQUAL_HEX8(0x99, w.take().uid.bytes[3]);
@@ -118,10 +120,10 @@ static void a_second_fob_replaces_the_first_and_starts_the_window_again() {
 
 static void a_fob_while_a_request_is_out_changes_nothing() {
   Window w(WINDOW);
-  w.fob(fob(), false, true, 0);
+  w.fob(fob(), false, READY, 0);
   w.press('A', 100);
   w.take();
-  w.fob(fob(), false, true, 200);
+  w.fob(fob(), false, READY, 200);
   TEST_ASSERT_FALSE(w.waiting());
   TEST_ASSERT_FALSE(w.press('B', 300));
   ASSERT_SIGNAL(Signal::Sending, w.signal(300));
@@ -129,7 +131,7 @@ static void a_fob_while_a_request_is_out_changes_nothing() {
 
 static void a_fob_during_play_does_nothing_and_the_press_stays_a_point() {
   Window w(WINDOW);
-  w.fob(fob(), true, true, 0);
+  w.fob(fob(), true, READY, 0);
   TEST_ASSERT_FALSE(w.waiting());
   ASSERT_SIGNAL(Signal::Rejected, w.signal(0));
   TEST_ASSERT_FALSE(w.press('A', 100));
@@ -137,7 +139,7 @@ static void a_fob_during_play_does_nothing_and_the_press_stays_a_point() {
 
 static void with_check_in_off_a_fob_is_not_held() {
   Window w(WINDOW);
-  w.fob(fob(), false, false, 0);
+  w.fob(fob(), false, Setup::NoApi, 0);
   TEST_ASSERT_FALSE(w.waiting());
   ASSERT_SIGNAL(Signal::Unavailable, w.signal(0));
   TEST_ASSERT_FALSE(w.press('A', 100));
@@ -146,24 +148,24 @@ static void with_check_in_off_a_fob_is_not_held() {
 static void an_empty_uid_is_not_a_fob() {
   Window w(WINDOW);
   Uid none{};
-  w.fob(none, false, true, 0);
+  w.fob(none, false, READY, 0);
   TEST_ASSERT_FALSE(w.waiting());
   // Nor does it cancel one that is waiting.
-  w.fob(fob(), false, true, 0);
-  w.fob(none, false, true, 10);
+  w.fob(fob(), false, READY, 0);
+  w.fob(none, false, READY, 10);
   TEST_ASSERT_TRUE(w.press('A', 20));
 }
 
 static void a_press_from_no_half_is_ignored() {
   Window w(WINDOW);
-  w.fob(fob(), false, true, 0);
+  w.fob(fob(), false, READY, 0);
   TEST_ASSERT_FALSE(w.press('C', 100));
   TEST_ASSERT_TRUE(w.waiting());
 }
 
 static void the_answer_is_shown_for_a_while_and_then_the_led_goes_dark() {
   Window w(WINDOW, 2000);
-  w.fob(fob(), false, true, 0);
+  w.fob(fob(), false, READY, 0);
   w.press('A', 100);
   w.take();
   w.answered(Signal::CheckedIn, 500);
@@ -171,7 +173,7 @@ static void the_answer_is_shown_for_a_while_and_then_the_led_goes_dark() {
   ASSERT_SIGNAL(Signal::CheckedIn, w.signal(2499));
   ASSERT_SIGNAL(Signal::Off, w.signal(2500));
   // And the next fob is welcome while it is still showing.
-  w.fob(fob(), false, true, 600);
+  w.fob(fob(), false, READY, 600);
   TEST_ASSERT_TRUE(w.waiting());
 }
 
@@ -180,11 +182,11 @@ static void the_answer_is_shown_for_a_while_and_then_the_led_goes_dark() {
 static void every_check_in_gets_a_higher_event_id() {
   Window w(WINDOW);
   w.seed(41);
-  w.fob(fob(), false, true, 0);
+  w.fob(fob(), false, READY, 0);
   w.press('A', 10);
   TEST_ASSERT_EQUAL_UINT32(42, w.take().eventId);
   w.answered(Signal::CheckedIn, 20);
-  w.fob(fob(), false, true, 30);
+  w.fob(fob(), false, READY, 30);
   w.press('B', 40);
   TEST_ASSERT_EQUAL_UINT32(43, w.take().eventId);
   TEST_ASSERT_EQUAL_UINT32(43, w.lastEventId());
@@ -193,7 +195,7 @@ static void every_check_in_gets_a_higher_event_id() {
 static void a_fob_that_expires_uses_no_event_id() {
   Window w(WINDOW);
   w.seed(7);
-  w.fob(fob(), false, true, 0);
+  w.fob(fob(), false, READY, 0);
   w.expire(WINDOW);
   TEST_ASSERT_EQUAL_UINT32(7, w.lastEventId());
 }
@@ -202,7 +204,7 @@ static void a_fob_that_expires_uses_no_event_id() {
 
 static void the_window_keeps_no_uid_once_it_is_handed_over() {
   Window w(WINDOW);
-  w.fob(fob(), false, true, 0);
+  w.fob(fob(), false, READY, 0);
   w.press('A', 10);
   Request r = w.take();
   TEST_ASSERT_FALSE(r.uid.empty());
@@ -239,7 +241,7 @@ static void a_ten_byte_uid_is_written_whole() {
 // in any spelling the reader or zaehlwerk would use.
 static void a_check_in_log_line_carries_no_uid() {
   Window w(WINDOW);
-  w.fob(fob(), false, true, 0);
+  w.fob(fob(), false, READY, 0);
   w.press('A', 10);
   Request r = w.take();
   const std::string body = checkin::requestBody("piezo-1", r);
@@ -316,6 +318,123 @@ static void only_no_answer_at_all_is_retried() {
   TEST_ASSERT_FALSE(checkin::worthRetrying(200));
 }
 
+/* ---------- the token (#65) ---------- */
+
+static const char *TOKEN = "s3cr3t-T0ken_for.the/hub+42=";
+
+static void without_a_token_a_fob_is_rejected_and_nothing_is_held() {
+  Window w(WINDOW);
+  TEST_ASSERT_EQUAL_STRING("no_token", w.fob(fob(), false, Setup::NoToken, 0));
+  TEST_ASSERT_FALSE(w.waiting());
+  // Rejected, not unknown: the fob may be fine, the board may not ask.
+  ASSERT_SIGNAL(Signal::Rejected, w.signal(0));
+  // And the press after it is not a check-in: nothing would be sent.
+  TEST_ASSERT_FALSE(w.press('A', 100));
+  TEST_ASSERT_EQUAL_UINT32(0, w.lastEventId());
+}
+
+static void the_fob_says_what_became_of_it() {
+  Window w(WINDOW);
+  TEST_ASSERT_EQUAL_STRING("off", w.fob(fob(), false, Setup::NoApi, 0));
+  TEST_ASSERT_EQUAL_STRING("busy", w.fob(fob(), true, READY, 10));
+  TEST_ASSERT_EQUAL_STRING("waiting", w.fob(fob(), false, READY, 20));
+  w.press('A', 30);
+  TEST_ASSERT_EQUAL_STRING("ignored", w.fob(fob(), false, READY, 40));
+}
+
+static void the_api_comes_before_the_token() {
+  TEST_ASSERT_TRUE(checkin::setupOf(true, true) == Setup::Ready);
+  TEST_ASSERT_TRUE(checkin::setupOf(true, false) == Setup::NoToken);
+  TEST_ASSERT_TRUE(checkin::setupOf(false, true) == Setup::NoApi);
+  TEST_ASSERT_TRUE(checkin::setupOf(false, false) == Setup::NoApi);
+}
+
+static void the_token_goes_out_as_a_bearer() {
+  TEST_ASSERT_EQUAL_STRING("Bearer s3cr3t-T0ken_for.the/hub+42=",
+                           checkin::authorization(TOKEN).c_str());
+}
+
+static void a_token_with_a_space_or_a_line_break_is_not_taken() {
+  TEST_ASSERT_TRUE(checkin::tokenUsable(TOKEN));
+  TEST_ASSERT_TRUE(checkin::tokenUsable("a"));
+  TEST_ASSERT_TRUE(checkin::tokenUsable(std::string(checkin::TOKEN_MAX, 'x')));
+  TEST_ASSERT_FALSE(checkin::tokenUsable(""));
+  TEST_ASSERT_FALSE(checkin::tokenUsable(std::string(checkin::TOKEN_MAX + 1, 'x')));
+  // The ways a token picks something up between a terminal and a form.
+  TEST_ASSERT_FALSE(checkin::tokenUsable("abc\n"));
+  TEST_ASSERT_FALSE(checkin::tokenUsable("abc\r\nX-Injected: 1"));
+  TEST_ASSERT_FALSE(checkin::tokenUsable(" abc"));
+  TEST_ASSERT_FALSE(checkin::tokenUsable("abc "));
+  TEST_ASSERT_FALSE(checkin::tokenUsable("ab\tc"));
+  TEST_ASSERT_FALSE(checkin::tokenUsable("t\xc3\xa4st"));  // not ASCII
+}
+
+static void a_wrong_or_missing_token_is_unauthorized_not_unknown() {
+  const int statuses[] = {401, 403};
+  for (const int status : statuses) {
+    // zaehlwerk's 401 body is an error, not an outcome; it must not matter.
+    const checkin::Verdict v =
+        checkin::judge(status, "{\"error\":\"check-in needs the hub's token\"}");
+    TEST_ASSERT_EQUAL_STRING("unauthorized", v.outcome);
+    ASSERT_SIGNAL(Signal::Rejected, v.signal);
+    TEST_ASSERT_FALSE(checkin::worthRetrying(status));
+  }
+  TEST_ASSERT_EQUAL_STRING("[checkin] half A (left) unauthorized event_id 7 http 401",
+                           checkin::logLine('A', "unauthorized", 7, 401).c_str());
+}
+
+static void a_token_cleared_before_the_request_sends_nothing_and_says_so() {
+  const checkin::Verdict v = checkin::judge(checkin::NO_TOKEN, "");
+  TEST_ASSERT_EQUAL_STRING("no_token", v.outcome);
+  ASSERT_SIGNAL(Signal::Rejected, v.signal);
+  TEST_ASSERT_FALSE(checkin::worthRetrying(checkin::NO_TOKEN));
+}
+
+static checkin::Status status(bool api, bool token) {
+  return {api, token, true, Signal::Off, WINDOW, "piezo-1", "claimed", 'A'};
+}
+
+// The page learns whether a token is set, and nothing else about it. Status has
+// no field the token could go in; this pins down what the JSON does say.
+static void the_page_hears_only_whether_a_token_is_set() {
+  TEST_ASSERT_EQUAL_STRING(
+      "{\"on\":true,\"api\":true,\"token\":true,\"reader\":true,\"signal\":\"off\","
+      "\"window_ms\":5000,\"source\":\"piezo-1\",\"last\":{\"outcome\":\"claimed\","
+      "\"half\":\"A\"}}",
+      checkin::statusJson(status(true, true)).c_str());
+  const std::string none = checkin::statusJson(status(true, false));
+  TEST_ASSERT_TRUE(contains(none, "\"on\":false"));
+  TEST_ASSERT_TRUE(contains(none, "\"token\":false"));
+  const std::string noApi = checkin::statusJson(status(false, true));
+  TEST_ASSERT_TRUE(contains(noApi, "\"on\":false"));
+  TEST_ASSERT_TRUE(contains(noApi, "\"api\":false"));
+}
+
+static void before_the_first_check_in_the_page_has_no_half() {
+  checkin::Status s = status(true, true);
+  s.lastOutcome = "";
+  s.lastHalf = ' ';
+  TEST_ASSERT_TRUE(contains(checkin::statusJson(s), "\"last\":{\"outcome\":\"\"}}"));
+}
+
+// Everything a check-in that zaehlwerk refused for its token leaves behind for
+// a log, with the token itself in the answer's body for good measure: neither
+// the line nor the page may carry it.
+static void a_refused_token_appears_in_no_log_line_and_not_on_the_page() {
+  const std::string answer = std::string("{\"error\":\"") + TOKEN + "\"}";
+  const checkin::Verdict v = checkin::judge(401, answer);
+  const std::string line = checkin::logLine('B', v.outcome, 9, 401);
+  TEST_ASSERT_FALSE(contains(line, TOKEN));
+  TEST_ASSERT_FALSE(contains(line, "s3cr3t"));
+  TEST_ASSERT_FALSE(contains(line, "Bearer"));
+  checkin::Status s = status(true, true);
+  s.lastOutcome = v.outcome;
+  s.lastHalf = 'B';
+  const std::string page = checkin::statusJson(s);
+  TEST_ASSERT_FALSE(contains(page, "s3cr3t"));
+  TEST_ASSERT_TRUE(contains(page, "\"outcome\":\"unauthorized\""));
+}
+
 /* ---------- the LED ---------- */
 
 static void waiting_blinks_green_and_the_answers_are_told_apart() {
@@ -372,6 +491,17 @@ int main(int, char **) {
   RUN_TEST(the_statuses_map_to_the_led);
   RUN_TEST(an_outcome_not_on_the_list_is_never_copied_into_the_log);
   RUN_TEST(only_no_answer_at_all_is_retried);
+
+  RUN_TEST(without_a_token_a_fob_is_rejected_and_nothing_is_held);
+  RUN_TEST(the_fob_says_what_became_of_it);
+  RUN_TEST(the_api_comes_before_the_token);
+  RUN_TEST(the_token_goes_out_as_a_bearer);
+  RUN_TEST(a_token_with_a_space_or_a_line_break_is_not_taken);
+  RUN_TEST(a_wrong_or_missing_token_is_unauthorized_not_unknown);
+  RUN_TEST(a_token_cleared_before_the_request_sends_nothing_and_says_so);
+  RUN_TEST(the_page_hears_only_whether_a_token_is_set);
+  RUN_TEST(before_the_first_check_in_the_page_has_no_half);
+  RUN_TEST(a_refused_token_appears_in_no_log_line_and_not_on_the_page);
 
   RUN_TEST(waiting_blinks_green_and_the_answers_are_told_apart);
 
