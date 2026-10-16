@@ -750,8 +750,8 @@ void setup() {
     }
     // Without this a phone keeps serving the page it cached, and a freshly
     // uploaded UI never arrives — which looks exactly like a change that was
-    // never made. The page is 22 KB over the local network; there is nothing to
-    // save here.
+    // never made. The page is 41 KB over the local network, most of it the
+    // mascot; there is nothing to save here.
     server.sendHeader("Cache-Control", "no-store");
     server.streamFile(f, "text/html");
     f.close();
