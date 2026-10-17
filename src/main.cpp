@@ -41,7 +41,9 @@
 
 #include "config.h"
 #include "diag.h"
+#include "fob.h"
 #include "game.h"
+#include "ingest.h"
 #include "mock.h"
 #include "net.h"
 #include "ota.h"
@@ -89,9 +91,8 @@ QueueHandle_t queue;
 // moves to core 1, where nothing else runs. Core 1's idle task is not watched by
 // the watchdog in this build, so a tight loop there is survivable; on core 0 it
 // would starve wifi and lwIP.
-#ifndef ZW_SENSOR_CORE
-#define ZW_SENSOR_CORE 0
-#endif
+// ZW_SENSOR_CORE is in include/config.h, because the fob reader has to know
+// which core to stay off.
 // How many readings between one tick of sleep. A bare taskYIELD() here starved
 // core 1's idle task: the image booted, confirmed itself valid after the ten
 // second probation and then crash-looped every thirty-five seconds — past the
@@ -473,6 +474,14 @@ const char *zurueck(const String &marke = "", const String &kommentar = "") {
   return ballwechselVerworfen ? "rally+point" : "point";
 }
 
+// Whether play is going on, as far as this board can tell: a rally open, or a
+// game between its first point and its last. A fob is then refused, so the next
+// press stays a point instead of being taken as a check-in (ADR-0007). Whether
+// a match is running at zaehlwerk is zaehlwerk's to say, and it does, with a
+// 409 — this only keeps the board from eating a point while it asks.
+bool spielLaeuft() {
+  return rally.length() > 0 || (!vorbei && (punkteA > 0 || punkteB > 0));
+}
 void neuesSpiel() {
   punkteA = punkteB = 0; vorbei = false; sieger = ' ';
   aufschlag = ersterAufschlag; rally = ""; logAnzahl = 0; verlaufN = 0;
@@ -740,6 +749,10 @@ void setup() {
   net::begin({ ZW_HOSTNAME, AP_PREFIX, AP_PASS,
                ZW_STA_SSID, ZW_STA_PASS, ZW_STA_TIMEOUT_MS });
 
+  // The fob reader, on the core that does not sample (ADR-0003, ADR-0007).
+  ingest::begin();
+  fob::begin();
+
   server.on("/", []{
     File f = LittleFS.open("/index.html", "r");
     if (!f || f.isDirectory()) {
@@ -758,6 +771,40 @@ void setup() {
   });
   server.on("/state", handleState);
   server.on("/version", handleVersion);
+  // Check-in by fob. ?press=A or ?press=B stands in for a paired button until the
+  // ESP-NOW path of #58 exists, and does only that: with no fob waiting it is not
+  // a point, just a press that came to nothing.
+  server.on("/checkin", []{
+    if (server.hasArg("press")) {
+      const String s = server.arg("press");
+      const bool taken = (s == "A" || s == "B") && fob::press(s[0]);
+      server.send(200, "application/json",
+                  String("{\"taken\":") + (taken ? "true" : "false") +
+                  ",\"checkin\":" + fob::stateJson() + "}");
+      return;
+    }
+    server.send(200, "application/json", fob::stateJson());
+  });
+  // zaehlwerk's CHECKIN_TOKEN (#65). POST, like /wifi: a token does not belong
+  // in a URL. `token=` empty clears it. The answer says whether one is set and
+  // never echoes it, and neither does the log line.
+  server.on("/checkin/token", HTTP_POST, []{
+    if (!server.hasArg("token")) {
+      server.send(400, "text/plain", "token fehlt\n");
+      return;
+    }
+    String t = server.arg("token");
+    const ingest::TokenChange c = ingest::setCheckinToken(t);
+    if (t.length()) memset(&t[0], 0, t.length());
+    if (c == ingest::TokenChange::Refused) {
+      server.send(400, "text/plain",
+                  "Nicht gespeichert: 1 bis 256 Zeichen, ohne Leerzeichen und Umlaute.\n");
+      return;
+    }
+    Serial.println(c == ingest::TokenChange::Set ? "[checkin] token set on the page"
+                                                 : "[checkin] token cleared on the page");
+    server.send(200, "application/json", fob::stateJson());
+  });
   server.on("/net", handleNet);
   server.on("/wifi", HTTP_POST, handleWifi);
   server.on("/punkt", []{
@@ -970,6 +1017,8 @@ void loop() {
   simulationTreiben();
   mock::tick();
   diag::tick();
+  fob::setBusy(spielLaeuft());
+  fob::tick();
   ota::handle();
   ota::tick(startWarSauber());
 
