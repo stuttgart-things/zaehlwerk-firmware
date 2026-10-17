@@ -206,6 +206,11 @@ task sink:mock RALLIES=40
 task sink:mock CORRECTIONS=0.5  # half the points end as a tagged correction
 ```
 
+The seed is fixed (1), so the same knobs give the same session -- and the same
+session id. A second run with the same seed therefore lands in the first run's
+file. Something that sends again and again, like a CronJob in a lab cluster,
+passes `-seed 0`, which picks a fresh seed and so a fresh session each time.
+
 `LOSS` is how the gap detection and the incomplete-event path get exercised: a
 dropped chunk leaves an event that never completes, which has to be written off
 rather than waited for.
