@@ -77,6 +77,23 @@ type Point struct {
 	PlayerName string `json:"player_name,omitempty"`
 }
 
+// Match is the part of a match event that says which zaehlwerk match the
+// board's points go to (#42). The firmware puts match_id on every match event
+// while it is in one, so the last one says it.
+type Match struct {
+	Phase   string `json:"phase"`
+	MatchID string `json:"match_id"`
+}
+
+// inForce is the match the points after this event belong to: none after a
+// leave, although the leave itself still names the match it left.
+func (m Match) inForce() string {
+	if m.Phase == "leave" {
+		return ""
+	}
+	return m.MatchID
+}
+
 func parseEnvelope(b []byte) (Envelope, error) {
 	var e Envelope
 	err := json.Unmarshal(b, &e)

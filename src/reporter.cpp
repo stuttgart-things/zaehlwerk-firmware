@@ -32,6 +32,11 @@ TaskHandle_t task_ = nullptr;
 volatile uint32_t generation_ = 0;
 bool announce_ = false;
 bool clockSaid_ = false;
+// The match the diag log was last told the board's points go to (#42), and
+// zaehlwerk's last word on it, which the "leave" repeats: by then the link has
+// already forgotten it. Only touched from loop().
+std::string stamped_;
+report::State last_;
 
 struct Guard {
   Guard() { xSemaphoreTake(lock_, portMAX_DELAY); }
@@ -107,6 +112,14 @@ String players(const report::State &s) {
   return j;
 }
 
+// A "join" or "leave" in the diag log's own `match` event, with zaehlwerk's
+// players and ends, so the sink can put every point after it into that match.
+void announce(const char *phase, const report::State &s) {
+  const report::Board b = report::boardFrom(s, 'A');
+  diag::match(phase, s.players[0].c_str(), s.players[1].c_str(), b.sideToPlayer[0],
+              b.sideToPlayer[1], b.setNumber);
+}
+
 }  // namespace
 
 void begin() {
@@ -144,6 +157,10 @@ void tick(void (*apply)(const report::State &), bool mock) {
   report::State adopted;
   bool adopt = false;
   report::State match;
+  // In mock mode nothing is sent, so the board's points belong to no match,
+  // even while the link stays joined.
+  bool moved = false;
+  report::State current;
   {
     Guard g;
     while (n < 8 && link_.takeRecord(recs[n])) n++;
@@ -152,6 +169,10 @@ void tick(void (*apply)(const report::State &), bool mock) {
     // times a second, and copying names each time would be heap churn for
     // nothing.
     if (n) match = link_.match();
+    const report::Phase p = link_.phase();
+    const bool in = !mock && (p == report::Phase::Joined || p == report::Phase::Finished);
+    moved = in ? link_.match().matchId != stamped_ : !stamped_.empty();
+    if (moved && in) current = link_.match();
   }
   for (size_t i = 0; i < n; i++) {
     const report::Record &r = recs[i];
@@ -172,6 +193,19 @@ void tick(void (*apply)(const report::State &), bool mock) {
                     r.reason[0] ? ")" : "", r.matchId[0] ? (String(" ") + r.matchId).c_str() : "");
     }
   }
+  if (moved) {
+    if (!stamped_.empty()) {
+      announce("leave", last_);
+      diag::setMatchId("");
+    }
+    stamped_ = current.matchId;
+    last_ = current;
+    if (!stamped_.empty()) {
+      diag::setMatchId(stamped_.c_str());
+      announce("join", current);
+    }
+  }
+  if (adopt && adopted.matchId == stamped_) last_ = adopted;
   if (adopt && apply && !mock) apply(adopted);
 }
 

@@ -43,6 +43,7 @@ type GamePoint struct {
 	Side       string         `json:"side"`
 	Player     string         `json:"player,omitempty"`
 	PlayerName string         `json:"player_name,omitempty"`
+	MatchID    string         `json:"match_id,omitempty"`
 	To         map[string]any `json:"to"`
 	Tag        string         `json:"tag,omitempty"`
 	Note       string         `json:"note,omitempty"`
@@ -85,6 +86,10 @@ type Game struct {
 	DurationS int            `json:"duration_s"`
 	Final     map[string]any `json:"final,omitempty"`
 
+	// The zaehlwerk match the game was played in (#42), the last one if it
+	// changed during the game. Each point says its own.
+	MatchID string `json:"match_id,omitempty"`
+
 	// What the recording itself did, because a game with holes in it must not
 	// read like a complete one.
 	Transport map[string]uint64 `json:"transport"`
@@ -123,6 +128,7 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 		curRally         *GameRally
 		firmware, params map[string]any
 		players, sides   map[string]any
+		match            string
 		session          string
 		lost, held       uint64
 		incomplete       uint64
@@ -148,7 +154,7 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 		cur = &Game{
 			Number: nummer, SetNumber: satz, Session: session, Firmware: firmware,
 			Params: kopie(params), ParamsChanged: []ParamChange{},
-			Players: kopie(players), Sides: kopie(sides), Started: at,
+			Players: kopie(players), Sides: kopie(sides), MatchID: match, Started: at,
 			Transport: map[string]uint64{},
 		}
 		curRally = nil
@@ -244,6 +250,10 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 			if s, ok := m["sides"].(map[string]any); ok {
 				sides = s
 			}
+			match = Match{Phase: str(m, "phase"), MatchID: str(m, "match_id")}.inForce()
+			if cur != nil && match != "" {
+				cur.MatchID = match
+			}
 			if str(m, "phase") == "start" {
 				if n := num(m, "set_number"); n > 0 {
 					satz = n
@@ -313,7 +323,7 @@ func splitGames(path string, withSamples bool) ([]Game, error) {
 				PointID: str(m, "point_id"), Reason: str(m, "reason"),
 				Hint: str(m, "hint"), Side: str(m, "side"),
 				Player: str(m, "player"), PlayerName: str(m, "player_name"),
-				Tag: str(m, "tag"), Note: str(m, "note"),
+				Tag: str(m, "tag"), Note: str(m, "note"), MatchID: match,
 			}
 			if to, ok := m["to"].(map[string]any); ok {
 				p.To = to

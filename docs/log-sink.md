@@ -204,7 +204,13 @@ task sink:mock LOSS=0.05        # drop a twentieth of the datagrams
 task sink:mock WRONG=0.3        # decide three in ten on the wrong side
 task sink:mock RALLIES=40
 task sink:mock CORRECTIONS=0.5  # half the points end as a tagged correction
+task sink:mock MATCH=none       # a board with no zaehlwerk match
 ```
+
+The session joins a made-up zaehlwerk match before the first rally and leaves
+it after the last, as a board with a zaehlwerk address does (#42), so
+`points_per_match` and the `match_id` in the game files have something to show.
+`MATCH=c462e62c` names the match, `MATCH=none` plays without one.
 
 The seed is fixed (1), so the same knobs give the same session -- and the same
 session id. A second run with the same seed therefore lands in the first run's

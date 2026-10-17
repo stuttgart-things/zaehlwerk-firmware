@@ -41,12 +41,20 @@ func (se *Session) count(raw []byte, typ string) {
 			if p.PlayerName != "" && p.Reason != "undo" {
 				se.Players[p.PlayerName]++
 			}
+			if se.match != "" && p.Reason != "undo" {
+				se.Matches[se.match]++
+			}
 			if p.PointID != "" && p.Reason != "undo" && se.pointSides != nil {
 				se.pointSides[p.PointID] = p.Side
 			}
 		}
 	case "rally":
 		se.Rallies++
+	case "match":
+		var m Match
+		if json.Unmarshal(raw, &m) == nil {
+			se.match = m.inForce()
+		}
 	}
 }
 
@@ -70,6 +78,9 @@ type Summary struct {
 	Reasons   map[string]uint64 `json:"points_per_reason"`
 	Tags      map[string]uint64 `json:"corrections_per_tag"`
 	Players   map[string]uint64 `json:"points_per_player"`
+	// Which zaehlwerk match the points went to (#42). That id leads on to the
+	// Schmetterpause match and its players; the sink never holds a player id.
+	Matches map[string]uint64 `json:"points_per_match,omitempty"`
 
 	// Only meaningful for a mock session, where every generated hit says which
 	// side it was meant to be. Nothing has to be labelled by hand for this one.
@@ -151,6 +162,7 @@ func (se *Session) Summary() Summary {
 		Reasons:     se.Reasons,
 		Tags:        se.Tags,
 		Players:     se.Players,
+		Matches:     se.Matches,
 		Intended:    se.Intended,
 		ByType:      se.ByType,
 		RightByType: se.RightByType,
@@ -216,6 +228,12 @@ func (s Summary) Text() string {
 		b.WriteString("  points by player\n")
 		for _, k := range sortedKeys(s.Players) {
 			fmt.Fprintf(&b, "    %-16s %d\n", k, s.Players[k])
+		}
+	}
+	if len(s.Matches) > 0 {
+		b.WriteString("  points by zaehlwerk match\n")
+		for _, k := range sortedKeys(s.Matches) {
+			fmt.Fprintf(&b, "    %-16s %d\n", k, s.Matches[k])
 		}
 	}
 	if len(s.Tags) > 0 {

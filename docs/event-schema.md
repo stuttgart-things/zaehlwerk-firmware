@@ -239,9 +239,36 @@ the export instead of invalidating the session.
 `end`. `sides` is the mapping in force from this event onwards; it is what
 makes every later `point` resolvable.
 
-`match_id` is not on this event yet
-([#42](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/42)); the
-match the board joined at zaehlwerk is on the `link` events below.
+### The zaehlwerk match
+
+With a zaehlwerk address, the board also says which match its points go to
+([#42](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/42)):
+
+```json
+{ "type": "match", "phase": "join", "match_id": "c462e62c",
+  "set_number": 1,
+  "players": { "a": "Pat", "b": "Ana" },
+  "sides":   { "A": "a", "B": "b" } }
+```
+
+- `join` when the board joined a running match, with zaehlwerk's players and
+  ends; `leave` when it is out of it again (ended on the page, a demo became
+  current, the address was cleared) or switched to mock, which sends nothing.
+  `leave` repeats the last players and ends zaehlwerk reported and still
+  names the match it left.
+- Between the two, **every** `match` event carries `match_id`, so the last
+  `match` event before a `point` says which match it belongs to. A won match
+  stays joined until it ends on the page, because an undo can still take the
+  match point back.
+- The sink stores `match_id` on every point in the game files, on the game
+  itself, and counts `points_per_match` in the summary.
+
+That is the chain **session → zaehlwerk `match_id` → Schmetterpause match →
+player ids**: zaehlwerk logs its `match_id` with the Schmetterpause match it
+reported. Neither the board nor the sink holds a player id.
+
+`join` and `leave` sit next to the `link` events `joined` and `left` below,
+which say where the link stands; these say where the points went.
 
 **Names are optional.** Without them everything keeps saying `A` and `B`, and
 `players` carries empty strings. For doubles both names go in one field —
