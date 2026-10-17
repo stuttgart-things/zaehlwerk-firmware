@@ -93,6 +93,7 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   <div class="score" id="sc">0:0</div>
   <div class="serve" id="sv">Aufschlag A</div>
   <div class="rec off" id="rc">&#9675; wird nicht aufgezeichnet</div>
+  <div class="rec off" id="zr" style="display:none"></div>
   <div class="won" id="wn"></div>
   <div class="seq" id="sq"></div>
 </div>
@@ -207,6 +208,20 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
       <button class="warn" onclick="diagSpeichern(0)">Aus</button>
     </div>
     <div class="msg" id="dm"></div>
+  </div>
+</div>
+
+<div class="card"><h2>Zaehlwerk-Server</h2>
+  <div class="ni" id="zi">&hellip;</div>
+  <div class="net" style="margin-top:10px">
+    <label style="margin:0">Adresse</label>
+    <input type="text" id="zu" autocomplete="off" placeholder="http://192.168.178.20:8080">
+    <div class="row">
+      <button onclick="zwSpeichern(zu.value)">Speichern</button>
+      <button class="warn" onclick="zwSpeichern('')">Trennen</button>
+    </div>
+    <div class="msg" id="zm">Ohne Adresse zaehlt das Board allein, wie bisher.
+      Mit Adresse tritt es dem laufenden Match bei und meldet jeden Punkt.</div>
   </div>
 </div>
 
@@ -522,6 +537,51 @@ function senden(){
   x.onerror=()=>{um.textContent='Verbindung abgebrochen.';halt=0};
   x.send(fd);
 }
+// The link to zaehlwerk-api (ADR-0008). Shown under the score only once an
+// address is set, so a board without one looks exactly as it did.
+const zwFehler={no_wifi:'kein WLAN',no_answer:'keine Antwort',unavailable:'503, Server startet?',
+  bad_gateway:'502',gateway_timeout:'504',bad_answer:'unlesbare Antwort',nvs:'NVS-Fehler'};
+function zwZeigen(z){
+  const an=z.configured, im=z.phase==='joined'||z.phase==='finished';
+  // Names come from Schmetterpause through zaehlwerk: text, never markup.
+  const h=t=>String(t).replace(/[&<>"]/g,c=>'&#'+c.charCodeAt(0)+';');
+  const wer=z.players[0]||z.players[1]?' &middot; '+h(z.players[0])+' gegen '+h(z.players[1]):'';
+  const lage=!an?'Nicht eingerichtet &mdash; das Board zaehlt allein'
+    :z.mock?'<span class="warn">Mock-Modus: es wird nichts gemeldet</span>'
+    :!z.reachable&&z.last_error?'<span class="warn">Server nicht erreichbar ('+(zwFehler[z.last_error]||z.last_error)
+      +')</span>'+(z.retry_in_ms?', naechster Versuch in '+Math.ceil(z.retry_in_ms/1000)+' s':'')
+    :z.phase==='waiting'?'Verbunden, wartet auf ein Match'
+    :z.phase==='demo'?'Verbunden, eine Demo laeuft &mdash; wartet auf ein echtes Match'
+    :z.phase==='finished'?'Match <b>'+z.match_id+'</b> beendet'+wer
+    :im?'Im Match <b>'+z.match_id+'</b>'+wer:'Verbindet &hellip;';
+  zi.innerHTML=lage
+    +(an?'<br>Adresse <b>'+z.url+'</b> &middot; Quelle <b>'+z.source+'</b>':'')
+    +(an?'<br>Gemeldet <b>'+z.acked+'</b> &middot; wartend <b>'+z.queued+'</b>'
+      +(z.dropped?' &middot; <span class="warn">verworfen '+z.dropped+'</span>':'')
+      +' &middot; event_id <b>'+z.event_id+'</b>':'')
+    +(an&&z.reachable&&z.last_error?'<br>Letzter Fehler: '+(zwFehler[z.last_error]||z.last_error)
+      +(z.last_http?' (HTTP '+z.last_http+')':''):'');
+  if(document.activeElement!==zu && !zu.value)zu.value=z.url;
+  zr.style.display=an?'block':'none';
+  zr.className='rec '+(im&&z.reachable&&!z.mock?'on':'off');
+  const ph={warmup:' &middot; Einspielen',serve_rally:' &middot; um die Angabe',change_ends:' &middot; Seitenwechsel'};
+  zr.innerHTML=im?'\u21C4  Zaehlwerk-Match '+z.match_id+(ph[z.zw_phase]||'')+(z.queued?' &middot; '+z.queued+' wartend':'')
+    :'\u21C4  Zaehlwerk: '+(z.reachable?(z.phase==='demo'?'Demo laeuft':'kein Match'):'nicht erreichbar');
+  // Joined, zaehlwerk owns the ends and the names (ADR-0008): pressing these
+  // here would be undone by its next answer.
+  document.querySelectorAll('.ends').forEach(e=>e.style.display=im?'none':'');
+  sm.textContent=im?'Seiten und Namen fuehrt der Zaehlwerk-Server.'
+    :'Seiten nach jedem Satz. Wird das vergessen, wandern alle weiteren Punkte auf die falsche Person.';
+}
+function zwLaden(){fetch('/zaehlwerk').then(r=>r.json()).then(zwZeigen).catch(()=>{})}
+function zwSpeichern(u){
+  halt=Date.now()+400;
+  fetch('/zaehlwerk/url',{method:'POST',body:new URLSearchParams({url:u})})
+    .then(r=>r.text()).then(t=>{zm.textContent=t;if(!u)zu.value='';zwLaden()})
+    .catch(()=>{zm.textContent='Ging nicht.'});
+}
+zwLaden();
+setInterval(zwLaden,2000);
 netLaden();
 spielerLaden();
 diagLaden();
