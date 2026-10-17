@@ -96,15 +96,17 @@ with the id it was given when it was queued:
   check-in uses on #64). It is stored before an event is first sent, not
   before it is queued: only an id that went out can collide with one sent
   after a reboot. If NVS cannot be written the event waits.
-- No answer, no wifi, or 502/503/504 from the gateway: the same event again,
+- No answer, no wifi, or any 5xx (the gateway's 502/503/504 during a
+  rollout, or zaehlwerk's own 500): the same event again,
   after 1 s doubling to 30 s with up to half again at random. There is no
   limit on tries; a board on the table keeps trying while it is switched on.
   This also covers a join poll: a rollout never makes the board give up the
-  match it is in.
+  match it is in. Retrying every 5xx is what the zaehlwerk piezo mock does,
+  and the mock is the reference client; #69 named only 502/503/504.
 - 404 or 409: the match is over or gone. That event and everything queued for
   the same match are dropped, each with a log record, and the board waits for
   the next match, or stays with a won one (below).
-- Any other answer (400, 500, ...): zaehlwerk refused it and would again. It is
+- Any other answer (400, 422, a 3xx, ...): zaehlwerk refused it and would again. It is
   dropped with a record, and the next event is not held up behind it.
 - The queue holds 64 events. When it is full a new event is refused and
   logged, and what is queued stays: zaehlwerk then holds a gapless prefix of
@@ -160,6 +162,7 @@ tens of kilobytes of heap per request and a certificate to check against.
   things that are not a game, so this decision waits instead, like the
   zaehlwerk piezo mock does.
 - https, if the lab's zaehlwerk is only reachable through a TLS gateway.
-- Whether a 500 from zaehlwerk should be retried. The mock retries every 5xx;
-  this drops it, as #69 asks only for 502/503/504.
+- A 500 that zaehlwerk keeps answering for one event (a bug on its side)
+  holds the queue behind that event until zaehlwerk is fixed. That is the
+  price of retrying every 5xx; the log shows it as one `retry` after another.
 - The `match` diagnostic event carrying `match_id` (#42).

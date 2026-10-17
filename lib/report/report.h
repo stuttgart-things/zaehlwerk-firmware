@@ -138,9 +138,9 @@ const char *halfToken(char half);
 // What to do after an attempt.
 enum class Next {
   Done,       // answered 2xx: delivered, or a duplicate of one that was
-  Retry,      // nobody answered, or a gateway said 502/503/504: same id, later
+  Retry,      // nobody answered, or any 5xx (a rollout's gateway): same id, later
   MatchGone,  // 404/409: the match is over or gone; the event has nowhere to go
-  Drop,       // any other answer: zaehlwerk refused it, and would again
+  Drop,       // any other answer (4xx, 3xx): zaehlwerk refused it, and would again
 };
 Next classify(int status);
 

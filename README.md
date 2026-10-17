@@ -173,7 +173,7 @@ dropped, the last `event_id` and the last error.
 - During warm-up and a change of ends a detected rally is not sent, because
   there a press confirms a side; a point given by hand is.
 - Nothing is sent in mock mode.
-- No answer, no wifi, or a 502/503/504 from the gateway (a rollout): the same
+- No answer, no wifi, or any 5xx (a rollout's 502/503/504, or a 500): the same
   event again with the same `event_id`, after 1 s doubling to 30 s. Events wait
   in order in a queue of 64. A 404/409 (match over) drops what was queued for
   that match; any other refusal drops that one event. Every step is in the

@@ -296,10 +296,33 @@ static void no_answer_and_gateway_errors_are_sent_again() {
   TEST_ASSERT_EQUAL(Next::Retry, report::classify(504));
 }
 
+// Like the zaehlwerk piezo mock, the reference client: a 5xx is never the
+// last word on an event, whoever said it.
+static void every_5xx_is_sent_again_like_the_reference_mock() {
+  TEST_ASSERT_EQUAL(Next::Retry, report::classify(500));
+  TEST_ASSERT_EQUAL(Next::Retry, report::classify(501));
+  TEST_ASSERT_EQUAL(Next::Retry, report::classify(599));
+  TEST_ASSERT_EQUAL(Next::Drop, report::classify(600));
+}
+
+static void a_500_holds_the_queue_and_keeps_the_event_id() {
+  Link l;
+  joined(l);
+  point(l, 'A');
+  point(l, 'B');
+  Request first = l.next(0, 0);
+  l.answered(first, 500, "{\"error\":\"x\"}", 0, 0);
+  TEST_ASSERT_EQUAL(2, (int)l.queued());
+  TEST_ASSERT_EQUAL_UINT32(0, l.status(0).dropped);
+  Request again = l.next(1500, 0);
+  TEST_ASSERT_EQUAL_UINT32(first.event.eventId, again.event.eventId);
+}
+
 static void any_other_answer_is_final() {
   TEST_ASSERT_EQUAL(Next::Done, report::classify(200));
   TEST_ASSERT_EQUAL(Next::Drop, report::classify(400));
-  TEST_ASSERT_EQUAL(Next::Drop, report::classify(500));
+  TEST_ASSERT_EQUAL(Next::Drop, report::classify(422));
+  TEST_ASSERT_EQUAL(Next::Drop, report::classify(301));
   TEST_ASSERT_EQUAL(Next::MatchGone, report::classify(404));
   TEST_ASSERT_EQUAL(Next::MatchGone, report::classify(409));
 }
@@ -723,6 +746,8 @@ int main(int, char **) {
   RUN_TEST(an_undo_carries_no_half_and_no_delta);
   RUN_TEST(a_source_with_a_quote_cannot_break_the_body);
   RUN_TEST(no_answer_and_gateway_errors_are_sent_again);
+  RUN_TEST(every_5xx_is_sent_again_like_the_reference_mock);
+  RUN_TEST(a_500_holds_the_queue_and_keeps_the_event_id);
   RUN_TEST(any_other_answer_is_final);
   RUN_TEST(the_wait_doubles_from_one_second_up_to_thirty);
   RUN_TEST(the_jitter_adds_at_most_half_again);

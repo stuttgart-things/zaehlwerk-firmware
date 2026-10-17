@@ -511,10 +511,11 @@ std::string body(const char *source, const Event &e) {
 Next classify(int status) {
   if (status >= 200 && status < 300) return Next::Done;
   if (status == NO_ANSWER || status == NO_WIFI) return Next::Retry;
-  // A rollout: the gateway in front of zaehlwerk answers while zaehlwerk does
-  // not (#69). Same id again, and if zaehlwerk did take the first one, the
-  // second is a duplicate (ADR-0002).
-  if (status == 502 || status == 503 || status == 504) return Next::Retry;
+  // Any 5xx: a rollout, where the gateway in front of zaehlwerk answers 502,
+  // 503 or 504 while zaehlwerk does not (#69), or zaehlwerk's own 500. Same id
+  // again, and if zaehlwerk did take the first one, the second is a duplicate
+  // (ADR-0002). The zaehlwerk piezo mock, the reference client, does the same.
+  if (status >= 500 && status <= 599) return Next::Retry;
   if (status == 404 || status == 409) return Next::MatchGone;
   return Next::Drop;
 }

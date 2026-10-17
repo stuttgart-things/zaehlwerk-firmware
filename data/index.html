@@ -540,7 +540,7 @@ function senden(){
 // The link to zaehlwerk-api (ADR-0008). Shown under the score only once an
 // address is set, so a board without one looks exactly as it did.
 const zwFehler={no_wifi:'kein WLAN',no_answer:'keine Antwort',unavailable:'503, Server startet?',
-  bad_gateway:'502',gateway_timeout:'504',bad_answer:'unlesbare Antwort',nvs:'NVS-Fehler'};
+  bad_gateway:'502',gateway_timeout:'504',server_error:'Serverfehler',bad_answer:'unlesbare Antwort',nvs:'NVS-Fehler'};
 function zwZeigen(z){
   const an=z.configured, im=z.phase==='joined'||z.phase==='finished';
   // Names come from Schmetterpause through zaehlwerk: text, never markup.
