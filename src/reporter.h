@@ -37,6 +37,11 @@ void manualPoint(char half, uint32_t pointId, bool mock);
 // /matches/{id}/undo (#67).
 void undo(uint32_t pointId, bool mock);
 
+// Joined to a match at zaehlwerk, or staying with one just won for the undo of
+// the match point. The score is zaehlwerk's then. Never in mock mode, where
+// nothing is sent.
+bool linked(bool mock);
+
 // GET /zaehlwerk.
 String statusJson(bool mock);
 
