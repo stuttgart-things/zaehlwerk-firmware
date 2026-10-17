@@ -320,9 +320,9 @@ not under the top.
 
 | Build flag | Default | |
 | --- | --- | --- |
-| `ZW_API_URL` | empty | zaehlwerk-api, `http://10.0.0.5:8080`. Empty: check-in is off and a fob gets "unavailable". An IP or a DNS name; `.local` is not resolved |
+| `ZW_API_URL` | empty | zaehlwerk-api, the same address the points go to. Seeds the board only while NVS holds none; set on the page in the card *Zaehlwerk-Server* (#66). Empty: check-in is off and a fob gets "unavailable" |
 | `ZW_CHECKIN_TOKEN` | empty | zaehlwerk's `CHECKIN_TOKEN`. Seeds the board only while NVS holds none; see below |
-| `ZW_INGEST_SOURCE` | `ZW_DEVICE_ID` | the `source` of the ingest contract. The `event_id` behind it is kept in NVS |
+| `ZW_INGEST_SOURCE` | `ZW_DEVICE_ID` | the `source` of the ingest contract. Points and check-ins count on the same `event_id`, kept in NVS |
 | `ZW_CHECKIN_WINDOW_MS` | `5000` | how long a fob waits for a press |
 | `ZW_FOB_CORE` | the core that does not sample | never `ZW_SENSOR_CORE`; the build fails if it is |
 

@@ -320,7 +320,7 @@ spelling; a fob that does not check in is debugged by its outcome.
 | --- | --- |
 | `waiting` | a fob was read, the window is open. No half yet |
 | `busy` | a fob during play, refused on the board; nothing was sent |
-| `off` | a fob with no `ZW_API_URL`; nothing was sent |
+| `off` | a fob with no zaehlwerk address on the board; nothing was sent |
 | `no_token` | a fob with no check-in token on the board; nothing was sent (#65) |
 | `ignored` | a fob while a request was out |
 | `expired` | nobody pressed within the window; the UID is gone |
