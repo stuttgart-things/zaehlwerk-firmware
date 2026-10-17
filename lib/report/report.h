@@ -22,17 +22,31 @@ namespace report {
 // values as the check-in client in #64, so the two can share one HTTP path.
 const int NO_WIFI = -2;    // the board is not on a network that leads anywhere
 const int NO_ANSWER = -1;  // on a network, but no answer: refused, timed out
+// https only: the server did not prove it is who the address says, with a
+// certificate chaining to the edge root. No request went out. -4, so it stays
+// apart from #64's NO_TOKEN (-3) when the two share one client.
+const int TLS_FAILED = -4;
+// https only: the board's clock has not been set by SNTP yet, so it did not
+// try. Nothing went out; the event waits like for no answer.
+const int NO_TIME = -5;
 
 // --- the address (#66) ------------------------------------------------------
 
 // Why an address was refused. None means it is usable.
-enum class UrlProblem { None, Length, Chars, Scheme, Https, Host, Local, Port, Path };
+enum class UrlProblem { None, Length, Chars, Scheme, Host, Local, Port, Path };
 
 // Checks an address typed on the board's page or given as ZW_API_URL:
-// http://, a host (an IP or a name the router's DNS knows) and an optional
-// port, nothing after it but an optional slash. An empty string is not checked
-// here; it means "clear" to the caller.
+// http:// or https://, a host (an IP or a name the router's DNS knows) and an
+// optional port, nothing after it but an optional slash. An empty string is
+// not checked here; it means "clear" to the caller.
+//
+// https is what the table's box and the lab serve: zaehlwerk behind the
+// Gateway, as https://zaehlwerk.<edge domain>, with a certificate chaining to
+// the stuttgart-things edge root, which is the only root the board trusts.
+// http stays for a zaehlwerk on a laptop.
 UrlProblem checkUrl(const std::string &url);
+// Whether the address is an https one: verified against the edge root.
+bool isHttps(const std::string &url);
 // The address as it is stored and used: the trailing slash taken off.
 std::string normaliseUrl(const std::string &url);
 // What the page says about a refused address. German, ASCII-transliterated

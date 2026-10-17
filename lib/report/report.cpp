@@ -33,12 +33,12 @@ UrlProblem checkUrl(const std::string &url) {
   for (char c : url)
     if ((unsigned char)c <= 0x20 || (unsigned char)c >= 0x7f) return UrlProblem::Chars;
 
-  // TLS is left out on purpose for now: the client would cost tens of
-  // kilobytes of heap per request and needs a certificate to check against.
-  if (startsWith(url, "https://")) return UrlProblem::Https;
-  if (!startsWith(url, "http://")) return UrlProblem::Scheme;
+  size_t scheme;
+  if (startsWith(url, "https://")) scheme = 8;
+  else if (startsWith(url, "http://")) scheme = 7;
+  else return UrlProblem::Scheme;
 
-  const std::string rest = url.substr(7);
+  const std::string rest = url.substr(scheme);
   size_t end = rest.find_first_of(":/");
   const std::string host = rest.substr(0, end);
   if (host.empty()) return UrlProblem::Host;
@@ -72,6 +72,8 @@ UrlProblem checkUrl(const std::string &url) {
   return UrlProblem::None;
 }
 
+bool isHttps(const std::string &url) { return startsWith(url, "https://"); }
+
 std::string normaliseUrl(const std::string &url) {
   std::string u = url;
   if (!u.empty() && u.back() == '/') u.pop_back();
@@ -83,10 +85,12 @@ const char *urlProblemText(UrlProblem p) {
     case UrlProblem::None:   return "";
     case UrlProblem::Length: return "Nicht gespeichert: 1 bis 96 Zeichen.";
     case UrlProblem::Chars:  return "Nicht gespeichert: keine Leerzeichen und keine Umlaute.";
-    case UrlProblem::Scheme: return "Nicht gespeichert: die Adresse beginnt mit http://";
-    case UrlProblem::Https:
-      return "Nicht gespeichert: https kann das Board noch nicht, bitte http:// verwenden.";
-    case UrlProblem::Host:   return "Nicht gespeichert: nach http:// fehlt ein gueltiger Rechnername oder eine IP.";
+    case UrlProblem::Scheme:
+      return "Nicht gespeichert: die Adresse beginnt mit https:// (Zaehlwerk hinter dem "
+             "Gateway) oder http:// (Zaehlwerk auf einem Laptop).";
+    case UrlProblem::Host:
+      return "Nicht gespeichert: nach http:// bzw. https:// fehlt ein gueltiger Rechnername "
+             "oder eine IP.";
     case UrlProblem::Local:
       return "Nicht gespeichert: .local-Namen loest das Board nicht auf. Bitte die IP "
              "oder einen Namen aus dem DNS des Routers eintragen.";
@@ -510,7 +514,10 @@ std::string body(const char *source, const Event &e) {
 
 Next classify(int status) {
   if (status >= 200 && status < 300) return Next::Done;
-  if (status == NO_ANSWER || status == NO_WIFI) return Next::Retry;
+  // A certificate that does not verify is retried too: the Gateway may be
+  // mid-renewal, and the board has nobody to ask. It never connects without.
+  if (status == NO_ANSWER || status == NO_WIFI || status == TLS_FAILED || status == NO_TIME)
+    return Next::Retry;
   // Any 5xx: a rollout, where the gateway in front of zaehlwerk answers 502,
   // 503 or 504 while zaehlwerk does not (#69), or zaehlwerk's own 500. Same id
   // again, and if zaehlwerk did take the first one, the second is a duplicate
@@ -747,6 +754,8 @@ const char *errorToken(int status) {
   switch (status) {
     case NO_WIFI:   return "no_wifi";
     case NO_ANSWER: return "no_answer";
+    case TLS_FAILED: return "tls";
+    case NO_TIME:   return "no_time";
     case 502:       return "bad_gateway";
     case 503:       return "unavailable";
     case 504:       return "gateway_timeout";
@@ -754,6 +763,10 @@ const char *errorToken(int status) {
     case 404:       return "not_found";
     case 409:       return "conflict";
     case 500:       return "server_error";
+    case 301:
+    case 302:
+    case 307:
+    case 308:       return "redirect";  // http:// where the server wants https://
     default:        return status >= 500 ? "server_error" : "http_error";
   }
 }

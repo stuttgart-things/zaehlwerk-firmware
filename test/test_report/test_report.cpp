@@ -91,10 +91,60 @@ static void a_trailing_slash_is_taken_off() {
   TEST_ASSERT_EQUAL_STRING("http://10.0.0.5", report::normaliseUrl("http://10.0.0.5").c_str());
 }
 
-static void https_is_refused_with_a_reason_rather_than_failing_later() {
-  TEST_ASSERT_EQUAL(UrlProblem::Https, report::checkUrl("https://zaehlwerk.example"));
-  TEST_ASSERT_TRUE(std::string(report::urlProblemText(UrlProblem::Https)).find("https") !=
+// What the table's box and the lab serve: zaehlwerk behind the Gateway, under
+// the edge's wildcard names.
+static void an_https_address_behind_the_gateway_is_usable() {
+  TEST_ASSERT_EQUAL(UrlProblem::None, report::checkUrl("https://zaehlwerk.edge.sthings.lab"));
+  TEST_ASSERT_EQUAL(UrlProblem::None,
+                    report::checkUrl("https://zaehlwerk.edge-tt-test1.4sthings.tiab.ssc.sva.de"));
+  TEST_ASSERT_EQUAL(UrlProblem::None, report::checkUrl("https://zaehlwerk.edge.sthings.lab:8443/"));
+  TEST_ASSERT_TRUE(report::isHttps("https://zaehlwerk.edge.sthings.lab"));
+  TEST_ASSERT_FALSE(report::isHttps("http://10.0.0.5:8080"));
+  TEST_ASSERT_EQUAL_STRING("https://zaehlwerk.edge.sthings.lab",
+                           report::normaliseUrl("https://zaehlwerk.edge.sthings.lab/").c_str());
+}
+
+static void an_https_address_is_held_to_the_same_rules() {
+  TEST_ASSERT_EQUAL(UrlProblem::Local, report::checkUrl("https://zaehlwerk.local"));
+  TEST_ASSERT_EQUAL(UrlProblem::Path, report::checkUrl("https://zaehlwerk.edge.sthings.lab/api"));
+  TEST_ASSERT_EQUAL(UrlProblem::Host, report::checkUrl("https://"));
+  TEST_ASSERT_EQUAL(UrlProblem::Port, report::checkUrl("https://zaehlwerk.edge.sthings.lab:0"));
+  TEST_ASSERT_EQUAL(UrlProblem::Scheme, report::checkUrl("HTTPS://zaehlwerk.edge.sthings.lab"));
+  TEST_ASSERT_TRUE(std::string(report::urlProblemText(UrlProblem::Scheme)).find("https://") !=
                    std::string::npos);
+}
+
+// A certificate that does not chain to the edge root never leads to a
+// request; it is tried again later, like no answer at all.
+static void a_failed_certificate_check_is_tried_again() {
+  TEST_ASSERT_EQUAL(Next::Retry, report::classify(report::TLS_FAILED));
+  Link l;
+  l.configure(true, 0);
+  l.answered(l.next(0, 0), report::TLS_FAILED, "", 0, 0);
+  TEST_ASSERT_EQUAL_STRING("tls", l.status(0).lastError);
+  TEST_ASSERT_EQUAL(Phase::Waiting, l.phase());
+}
+
+// Without a clock an https request is not even tried. The events wait, none
+// is dropped, and the page can say why.
+static void without_the_time_an_https_event_waits_and_is_not_dropped() {
+  TEST_ASSERT_EQUAL(Next::Retry, report::classify(report::NO_TIME));
+  Link l;
+  joined(l);
+  point(l, 'A');
+  Request r = l.next(0, 0);
+  l.answered(r, report::NO_TIME, "", 0, 0);
+  TEST_ASSERT_EQUAL(1, (int)l.queued());
+  TEST_ASSERT_EQUAL_UINT32(0, l.status(0).dropped);
+  TEST_ASSERT_EQUAL_STRING("no_time", l.status(0).lastError);
+  TEST_ASSERT_EQUAL_UINT32(r.event.eventId, l.next(5000, 0).event.eventId);
+}
+
+static void a_redirect_to_https_is_named_as_one() {
+  Link l;
+  l.configure(true, 0);
+  l.answered(l.next(0, 0), 301, "", 0, 0);
+  TEST_ASSERT_EQUAL_STRING("redirect", l.status(0).lastError);
 }
 
 static void a_local_name_is_refused_because_the_client_does_not_ask_mdns() {
@@ -723,7 +773,11 @@ int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(an_http_address_with_a_port_is_usable);
   RUN_TEST(a_trailing_slash_is_taken_off);
-  RUN_TEST(https_is_refused_with_a_reason_rather_than_failing_later);
+  RUN_TEST(an_https_address_behind_the_gateway_is_usable);
+  RUN_TEST(an_https_address_is_held_to_the_same_rules);
+  RUN_TEST(a_failed_certificate_check_is_tried_again);
+  RUN_TEST(without_the_time_an_https_event_waits_and_is_not_dropped);
+  RUN_TEST(a_redirect_to_https_is_named_as_one);
   RUN_TEST(a_local_name_is_refused_because_the_client_does_not_ask_mdns);
   RUN_TEST(an_address_with_a_path_is_refused);
   RUN_TEST(spaces_umlauts_and_control_characters_are_refused);
