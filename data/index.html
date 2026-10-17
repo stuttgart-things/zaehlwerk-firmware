@@ -52,6 +52,9 @@ button{flex:1;border:1px solid var(--line);background:#fff;border-radius:6px;pad
 font:600 14px inherit;color:var(--ink);cursor:pointer}
 button:active{background:#E7ECF0}
 button.warn{border-color:var(--orange);color:#B8541F}
+button.taster{padding:30px 6px;font-size:22px;touch-action:none;user-select:none;-webkit-user-select:none}
+button.taster.lang{background:#FFF0E8;border-color:var(--orange)}
+button.taster.sehr{background:#FFE0D0;border-color:#B8541F}
 label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
 input[type=range]{width:100%}
 .val{font:600 12px ui-monospace,monospace;color:var(--ink)}
@@ -96,6 +99,15 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   <div class="rec off" id="zr" style="display:none"></div>
   <div class="won" id="wn"></div>
   <div class="seq" id="sq"></div>
+</div>
+
+<div class="card"><h2>Taster</h2>
+  <div class="row">
+    <button class="taster" id="ta" data-s="A">A</button>
+    <button class="taster" id="tbb" data-s="B">B</button>
+  </div>
+  <div class="msg" id="tm" style="margin-top:8px">Kurz: Punkt. Lang (<span id="tl">1,0</span> s):
+    letzten zurück. Sehr lang (<span id="tv">3,0</span> s): neues Spiel. Wie die Taster an der Platte.</div>
 </div>
 
 <div class="card"><h2>Korrektur</h2>
@@ -162,6 +174,13 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   <input type="range" id="rlb" min="20" max="1000" step="10" onchange="cfg()">
   <label>Trennschärfe — <span class="val" id="vcr">1800</span> ‰</label>
   <input type="range" id="rcr" min="1000" max="3000" step="50" onchange="cfg()">
+
+  <div class="msg" style="margin-top:14px">Taster: ab wann ein Druck lang
+  (zurück) und sehr lang (neues Spiel) ist.</div>
+  <label>Lang ab — <span class="val" id="vbl">1000</span> ms</label>
+  <input type="range" id="rbl" min="300" max="2500" step="100" onchange="cfg()">
+  <label>Sehr lang ab — <span class="val" id="vbv">3000</span> ms</label>
+  <input type="range" id="rbv" min="1000" max="8000" step="250" onchange="cfg()">
 </div>
 
 <div class="card"><h2>Protokoll</h2><div id="lg"></div></div>
@@ -294,7 +313,11 @@ function go(u){
     .then(d=>{
       // Say what happened. Taking back a double award needs two presses, and
       // the first one discarding the open rally used to look like nothing.
-      if(d && d.undone){
+      if(d && d.action==='refused'){
+        km.textContent = d.reason==='next_game_on_zaehlwerk'
+          ? 'Verbunden mit Zählwerk: das nächste Spiel beginnt dort, nicht am Taster.'
+          : 'Nichts passiert.';
+      } else if(d && d.undone){
         km.textContent =
           d.undone==='rally+point' ? 'Ballwechsel verworfen und Punkt zurueckgenommen — Stand '+d.a+':'+d.b :
           d.undone==='point'       ? 'Punkt zurueckgenommen — Stand '+d.a+':'+d.b :
@@ -309,11 +332,42 @@ function go(u){
 function cfg(){
   const a=ra.value,b=rb.value,t=rt.value;
     const xa=rla.value,xb=rlb.value,cr=rcr.value;
+  const bl=rbl.value,bv=rbv.value;
   la.textContent=a;lb.textContent=b;lt.textContent=t;
     vla.textContent=xa;vlb.textContent=xb;vcr.textContent=cr;
+  vbl.textContent=bl;vbv.textContent=bv;
   halt=Date.now()+400;
-  fetch(`/cfg?a=${a}&b=${b}&t=${t}&la=${xa}&lb=${xb}&cr=${cr}`).then(tick);
+  // The board refuses a pair of press times nobody could press, and says why.
+  fetch(`/cfg?a=${a}&b=${b}&t=${t}&la=${xa}&lb=${xb}&cr=${cr}&bl=${bl}&bv=${bv}`)
+    .then(r=>{ if(!r.ok) r.text().then(m=>tm.textContent='Nicht übernommen: '+m); })
+    .then(tick);
 }
+// The virtual buttons are held, not clicked: the page measures how long, and
+// the board decides what that was with the same thresholds a button uses. The
+// colour changes the moment a press becomes long or very long, so the finger
+// knows when to let go — the LED on a radio button will do the same (#2).
+let zeiten={bl:1000,bv:3000};
+document.querySelectorAll('button.taster').forEach(b=>{
+  let seit=0, uhr=0;
+  const zeigen=()=>{
+    const ms=Date.now()-seit;
+    b.classList.toggle('lang', ms>=zeiten.bl && ms<zeiten.bv);
+    b.classList.toggle('sehr', ms>=zeiten.bv);
+  };
+  const ende=senden=>{
+    if(!seit) return;
+    const ms=Date.now()-seit; seit=0; clearInterval(uhr);
+    b.classList.remove('lang','sehr');
+    if(senden) go('/taste?s='+b.dataset.s+'&ms='+ms);
+  };
+  b.addEventListener('pointerdown',e=>{
+    e.preventDefault(); b.setPointerCapture(e.pointerId);
+    seit=Date.now(); uhr=setInterval(zeigen,50);
+  });
+  b.addEventListener('pointerup',()=>ende(true));
+  b.addEventListener('pointercancel',()=>ende(false));
+  b.addEventListener('contextmenu',e=>e.preventDefault());
+});
 // Resolving zaehlwerk.local costs five seconds per request on a phone and a Mac:
 // the IPv6 lookup never gets an answer and has to time out, while the board itself
 // replies in 23 ms. Measured 5.18 / 5.12 / 5.05 s by name against 0.023 s by
@@ -343,6 +397,10 @@ function tick(){
     sv.textContent=d.over?'Spiel beendet':'Aufschlag '+(d.serve=='A'?d.na:d.nb);
     wn.textContent=d.over?('Sieger: '+(d.winner=='A'?d.na:d.nb)):'';
     bpa.textContent='Punkt '+d.na; bpb.textContent='Punkt '+d.nb;
+    ta.textContent=d.na; tbb.textContent=d.nb;
+    zeiten={bl:d.bl,bv:d.bv};
+    tl.textContent=(d.bl/1000).toFixed(1).replace('.',',');
+    tv.textContent=(d.bv/1000).toFixed(1).replace('.',',');
     // Not a warning, just the truth in view. A game played without a sink
     // listening is gone the moment it is over, and nothing used to say so.
     rc.className = 'rec ' + (d.rec ? 'on' : 'off');
@@ -370,6 +428,7 @@ function tick(){
       ra.value=d.ta;rb.value=d.tb;rt.value=d.to;
       rla.value=d.la;rlb.value=d.lb;rcr.value=d.cr;
       vla.textContent=d.la;vlb.textContent=d.lb;vcr.textContent=d.cr;
+      rbl.value=d.bl;rbv.value=d.bv;vbl.textContent=d.bl;vbv.textContent=d.bv;
       la.textContent=d.ta;lb.textContent=d.tb;lt.textContent=d.to;
     }
     stand = Date.now();
