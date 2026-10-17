@@ -127,8 +127,50 @@ the game variables: it hands records and answers to `loop()`, which writes and
 applies them. The rules (queue, retry, interpretation of answers, join and
 demo, the address check) are in `lib/report` with native tests.
 
-**http only.** An `https://` address is refused with a reason. TLS would cost
-tens of kilobytes of heap per request and a certificate to check against.
+**https to the Gateway, trusting the edge root only; http for a laptop.** On
+the table's box and in the lab zaehlwerk is only reachable as
+`https://zaehlwerk.<edge domain>` through the Gateway; its http listener
+redirects. So:
+
+- An `https://` address is verified against one trust store,
+  `TLS_TRUST_ANCHORS_PEM` in `include/tls_trust_anchors.h`, which holds the
+  stuttgart-things edge root CA (EC P-384, valid to 2046) and nothing else,
+  copied from harvester's `clusters/edge/edge-root-ca.crt`, the root the
+  zaehlwerk piezo mock trusts. zaehlwerk is never on a public name, so no
+  public root is in it. A second root (ISRG Root X1 for a Let's Encrypt name,
+  say) would be one more PEM block in that same constant, added only with a
+  reason written here, because every root in it can vouch for any address.
+- mbedTLS checks the chain and the hostname, wildcards included
+  (`*.edge.sthings.lab`, `*.edge-tt-test1.4sthings.tiab.ssc.sva.de`). There is
+  no fallback to an unverified connection: a certificate that does not verify
+  means no request (`tls` in the log), and the event waits like for no answer.
+- The connection is kept open between requests (HTTP/1.1 keep-alive). The
+  handshake is the expensive part, about 40 KB of heap and a second or two of
+  CPU on core 1; polling every two seconds keeps one connection alive instead
+  of paying it per request. A kept connection that the server closed while it
+  idled is retried once at once on a fresh one, with the same event.
+- `/zaehlwerk` reports free heap, the lowest since boot and the largest free
+  block, so the cost can be read off a real board.
+- A `.local` name is still refused: the box names things with dnsmasq, and the
+  client does not ask mDNS.
+- `http://` stays for a zaehlwerk on a laptop. An answer of 301/308 is named
+  `redirect` on the page: an http address where the server wants https.
+
+**The clock.** The board has no RTC. With an https address it starts SNTP
+(the gateway DHCP handed out first, the Opal router on the box runs one, then
+`pool.ntp.org`) and makes no https request until the clock is set: the event
+waits, nothing is dropped, the page says *Uhrzeit fehlt*, and the log has
+`link`/`unreachable` with `no_time` and later `link`/`clock`. An http address
+starts no SNTP, so a board without https keeps the clock it had. The
+diagnostic log's `t_us` stays boot-relative; the clock is not used for it.
+
+The mbedTLS of the Arduino core this builds against (2.28.4, sdkconfig
+without `MBEDTLS_HAVE_TIME_DATE`) does not check certificate validity dates
+at all, so a board at 1970 would in fact verify. The wait is kept so that a
+core built with date checks does not turn into "not yet valid" at the table;
+`ZW_TLS_WAIT_FOR_TIME=0` switches it off. It also means an expired
+certificate is not refused by the board; trust rests on the chain to the edge
+root and the hostname.
 
 ## Consequences
 
@@ -153,6 +195,10 @@ tens of kilobytes of heap per request and a certificate to check against.
   NVS writes from the page already do.
 - One point is two requests at most: the ingest, and a poll only when nothing
   was sent for two seconds.
+- TLS costs about 130 KB of flash (the image goes from 76 % to 86 % of its
+  1.25 MB slot) and some 40 KB of heap while a connection is open.
+- With https and no reachable NTP server the board reports nothing; its page
+  says why.
 
 ## Left open
 
@@ -161,7 +207,6 @@ tens of kilobytes of heap per request and a certificate to check against.
   the ball into a demo ending it is the point. The board's piezos also hear
   things that are not a game, so this decision waits instead, like the
   zaehlwerk piezo mock does.
-- https, if the lab's zaehlwerk is only reachable through a TLS gateway.
 - A 500 that zaehlwerk keeps answering for one event (a bug on its side)
   holds the queue behind that event until zaehlwerk is fixed. That is the
   price of retrying every 5xx; the log shows it as one `retry` after another.

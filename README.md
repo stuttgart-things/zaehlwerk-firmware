@@ -123,23 +123,46 @@ connected:
 
 ### Setting the address
 
-On the board's page, card **Zaehlwerk-Server**: enter
-`http://<host>:<port>` and press *Speichern*. It applies at once, no restart,
+On the board's page, card **Zaehlwerk-Server**: enter the address and press
+*Speichern*. On the table's box and in the lab that is
+`https://zaehlwerk.<edge domain>`, zaehlwerk behind the Gateway; for a
+zaehlwerk on a laptop `http://<laptop IP>:8080`. It applies at once, no restart,
 and is kept in NVS. *Trennen* clears it, and it stays cleared across a reboot.
 Or from a laptop on the same network:
 
 ```bash
-curl -4 -s -X POST --data-urlencode "url=http://192.168.178.20:8080" http://zaehlwerk.local/zaehlwerk/url
+curl -4 -s -X POST --data-urlencode "url=https://zaehlwerk.edge.sthings.lab" http://zaehlwerk.local/zaehlwerk/url
 curl -4 -s -X POST --data-urlencode "url=" http://zaehlwerk.local/zaehlwerk/url   # clear
 curl -4 -s http://zaehlwerk.local/zaehlwerk                                        # state as JSON
 ```
 
-The board refuses, and says why: anything but `http://` (https is not
-supported yet), a `.local` name (its HTTP client asks DNS, not mDNS: use the IP
-or a name the router's DNS knows), a path after the port, spaces or umlauts.
+The board refuses, and says why: anything but `https://` or `http://`, a
+`.local` name (its HTTP client asks DNS, not mDNS: use the IP or a name
+dnsmasq or the router's DNS knows), a path after the port, spaces or umlauts.
+
+**https** is verified against the stuttgart-things edge root CA and nothing
+else (`include/tls_trust_anchors.h`, a public certificate copied from
+harvester's `clusters/edge/edge-root-ca.crt`), hostname included. There is no
+insecure fallback: a certificate that does not chain to the edge root means no
+request, and the card says *Zertifikat passt nicht zur Edge-Root-CA*. The board
+first sets its clock over SNTP (the DHCP gateway, then `pool.ntp.org`) and
+sends nothing over https until it has one; the card says *Uhrzeit fehlt* until
+then. To check the embedded root against the source, and the Gateway against
+it:
+
+```bash
+sed -n '/^-----BEGIN/,/^-----END/p' include/tls_trust_anchors.h > /tmp/edge-root.pem
+cmp /tmp/edge-root.pem ../harvester/clusters/edge/edge-root-ca.crt
+openssl s_client -connect <gateway IP>:443 -servername zaehlwerk.<edge domain> \
+  -CAfile /tmp/edge-root.pem -verify_hostname zaehlwerk.<edge domain> </dev/null | grep Verify
+```
+
+`/zaehlwerk` also reports `heap_free`, `heap_min` and `heap_block`: a TLS
+connection needs about 40 KB, and is kept open between requests.
 
 A board built from source can be seeded from `secrets.ini`
-(`-DZW_API_URL='"http://10.0.0.5:8080"'`, see `secrets.ini.example`). Like the
+(`-DZW_API_URL='"https://zaehlwerk.edge.sthings.lab"'`, see
+`secrets.ini.example`). Like the
 wifi credentials, the seed is used only while NVS holds no address; once one is
 set or cleared on the page, that wins. `-DZW_INGEST_SOURCE` names the board in
 the ingest contract (default: `ZW_DEVICE_ID`, `piezo-1`); two boards need two
@@ -200,8 +223,9 @@ Within two seconds the card says *Im Match*, and a tap on the table or *Punkt A*
 on the board shows up on zaehlwerk's page. An undo there shows up on the board.
 A firewall on the laptop has to let port 8080 in.
 
-**Against the lab's zaehlwerk.** Its address, as the board can reach it, on the
-card. Only a match started there is joined. To check #69, the rollout: with a
+**Against the lab's zaehlwerk.** `https://zaehlwerk.<edge domain>` on the
+card, a name the board's DNS resolves to the Gateway. The card should show
+*TLS, Uhrzeit gesetzt* and then *Im Match* once a match runs. Only a match started there is joined. To check #69, the rollout: with a
 match running that nobody is really playing, `kubectl -n zaehlwerk rollout
 restart deploy/zaehlwerk`, keep scoring, and compare zaehlwerk's events with
 the sink's `ingest` records afterwards: no point missing, none twice. The log

@@ -268,7 +268,7 @@ emits it.
 | Field | |
 | --- | --- |
 | `status` | `queued` when it enters the queue; then, per attempt, exactly one of `acked`, `retry` or `dropped`. There is no separate `sent`: every send ends in one of the three |
-| `reason` | for `retry`: `no_wifi`, `no_answer`, `bad_gateway`, `unavailable`, `gateway_timeout`, `server_error` (any other 5xx), `nvs` (the id could not be stored, so it was not sent). For `dropped`: `match_over` (404/409), `refused` (any other answer), `queue_full`, `phase` (a detected rally during warm-up or a change of ends, not sent), `address_changed`, `address_cleared` |
+| `reason` | for `retry`: `no_wifi`, `no_answer`, `bad_gateway`, `unavailable`, `gateway_timeout`, `server_error` (any other 5xx), `tls` (the certificate did not verify against the edge root; nothing was sent), `no_time` (https waits for SNTP; nothing was sent), `nvs` (the id could not be stored, so it was not sent). For `dropped`: `match_over` (404/409), `refused` (any other answer), `queue_full`, `phase` (a detected rally during warm-up or a change of ends, not sent), `address_changed`, `address_cleared` |
 | `action` | `point` or `undo` ([zaehlwerk ADR-0012](https://github.com/stuttgart-things/zaehlwerk/blob/main/docs/adr/0012-taking-a-point-back-through-the-ingest-contract.md)) |
 | `point_id`, `rally_id` | the board's own point and rally this came from. Absent for a rally that awarded nothing (`delta: 0`, only `rally_id`) and for an undo that took nothing back locally |
 | `match_id`, `source`, `half`, `delta`, `event_id` | exactly what went over the wire. An undo has no `half` and no `delta`. `side` is the same half in the log's own spelling |
@@ -298,6 +298,7 @@ Also only with a zaehlwerk address.
 | `waiting`, `demo` | no match, or a demo, while the board was not in one |
 | `unreachable` | the first failed request in a row. `reason` as for `ingest` `retry`, `retry_in_ms` |
 | `back` | the first answer after that. `tries` failed requests, `after_ms` how long it took. A rollout reads as one `unreachable` and one `back` |
+| `clock` | SNTP set the clock, once per boot, with `unix`. https waits for it |
 | `adopted` | the board took zaehlwerk's score in place of its own count, because they differed. `from` and `to` carry `a`, `b` (points by half), `serve` and `set_number`; `to` also `over` |
 
 `adopted` is what explains a score that changed with no `point` before it:
