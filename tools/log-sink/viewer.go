@@ -42,6 +42,7 @@ pre{font:12px ui-monospace,monospace;white-space:pre-wrap;color:var(--muted)}
 
 type viewEvent struct {
 	Seq      uint64
+	ID       string
 	Type     string
 	Decision string
 	Side     string
@@ -90,7 +91,7 @@ func readSession(path string) ([]viewEvent, sessionParams, error) {
 				params = s.Params
 			}
 		}
-		ev := viewEvent{Seq: env.Seq, Type: env.Type, Raw: line}
+		ev := viewEvent{Seq: env.Seq, ID: env.ID, Type: env.Type, Raw: line}
 		var extra struct {
 			Decision   string  `json:"decision"`
 			Side       *string `json:"side"`
@@ -128,6 +129,16 @@ func page(w http.ResponseWriter, title, body string) {
 }
 
 func serveViewer(addr, dir string, sink *Sink) {
+	if err := http.ListenAndServe(addr, newViewer(dir, sink)); err != nil {
+		fmt.Println("viewer:", err)
+	}
+}
+
+// newViewer is the viewer and the labelling pages on one mux. Its own mux
+// rather than the default one, so a test can stand one up per sink.
+func newViewer(dir string, sink *Sink) *http.ServeMux {
+	mux := http.NewServeMux()
+
 	// Sessions live under the day they were recorded, so the listing looks
 	// across all of them and the file name alone still finds one.
 	findSession := func(name string) string {
@@ -138,7 +149,7 @@ func serveViewer(addr, dir string, sink *Sink) {
 		return filepath.Join(dir, "sessions", name)
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
@@ -147,7 +158,8 @@ func serveViewer(addr, dir string, sink *Sink) {
 		sort.Sort(sort.Reverse(sort.StringSlice(entries)))
 
 		var b strings.Builder
-		b.WriteString("<h1>zaehlwerk log-sink</h1>")
+		b.WriteString(`<h1>zaehlwerk log-sink</h1>
+<p><a href="/mark"><b>Markieren</b></a> — der große Knopf für während des Spiels</p>`)
 		for _, se := range sink.Sessions() {
 			b.WriteString("<div class=card><pre>" +
 				html.EscapeString(se.Summary().Text()) + "</pre></div>")
@@ -163,14 +175,14 @@ func serveViewer(addr, dir string, sink *Sink) {
 				size = st.Size()
 			}
 			name := filepath.Base(e)
-			fmt.Fprintf(&b, `<tr><td><a href="/session?f=%s">%s</a></td><td>%d kB</td></tr>`,
-				html.EscapeString(name), html.EscapeString(name), size/1024)
+			fmt.Fprintf(&b, `<tr><td><a href="/session?f=%s">%s</a></td><td><a href="/timeline?f=%s">timeline &amp; labels</a></td><td>%d kB</td></tr>`,
+				html.EscapeString(name), html.EscapeString(name), html.EscapeString(name), size/1024)
 		}
 		b.WriteString("</table></div>")
 		page(w, "log-sink", b.String())
 	})
 
-	http.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/session", func(w http.ResponseWriter, r *http.Request) {
 		name := filepath.Base(r.URL.Query().Get("f"))
 		evs, _, err := readSession(findSession(name))
 		if err != nil {
@@ -180,7 +192,8 @@ func serveViewer(addr, dir string, sink *Sink) {
 		only := r.URL.Query().Get("only")
 
 		var b strings.Builder
-		fmt.Fprintf(&b, `<h1>%s</h1><p><a href="/">back</a></p>`, html.EscapeString(name))
+		fmt.Fprintf(&b, `<h1>%s</h1><p><a href="/">back</a> · <a href="/timeline?f=%s">timeline &amp; labels</a></p>`,
+			html.EscapeString(name), html.EscapeString(name))
 		b.WriteString(`<div class=filters style="margin-top:10px">`)
 		for _, f := range []string{"", "counted", "ambiguous", "below_threshold", "deadtime", "point", "rally", "sink"} {
 			label := f
@@ -235,16 +248,19 @@ Showing the first 500 that match. Narrow it with a filter — the file has them 
 		page(w, name, b.String())
 	})
 
-	http.HandleFunc("/event", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/event", func(w http.ResponseWriter, r *http.Request) {
 		name := filepath.Base(r.URL.Query().Get("f"))
 		seq, _ := strconv.ParseUint(r.URL.Query().Get("seq"), 10, 64)
+		// The timeline links by event id: a sequence number is only unique
+		// within one boot, and a file can hold the session event twice.
+		id := r.URL.Query().Get("id")
 		evs, params, err := readSession(findSession(name))
 		if err != nil {
 			http.Error(w, err.Error(), 404)
 			return
 		}
 		for _, e := range evs {
-			if e.Seq != seq {
+			if (id != "" && e.ID != id) || (id == "" && e.Seq != seq) {
 				continue
 			}
 			var full struct {
@@ -264,15 +280,16 @@ Showing the first 500 that match. Narrow it with a filter — the file has them 
 			b.WriteString(curveSVG(full.Samples.TUs, full.Samples.A, full.Samples.B, params))
 			b.WriteString("</div><div class=card><pre>" +
 				html.EscapeString(pretty(e.Raw)) + "</pre></div>")
-			page(w, fmt.Sprintf("seq %d", seq), b.String())
+			page(w, fmt.Sprintf("seq %d", e.Seq), b.String())
 			return
 		}
 		http.NotFound(w, r)
 	})
 
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		fmt.Println("viewer:", err)
-	}
+	mux.HandleFunc("/timeline", handleTimeline(findSession))
+	mux.HandleFunc("/mark", handleMark(sink))
+	mux.HandleFunc("/label", handleLabel(sink, findSession))
+	return mux
 }
 
 func pretty(raw []byte) string {

@@ -65,6 +65,10 @@ type Session struct {
 	Points   uint64
 	Rallies  uint64
 
+	// Which half each point went to, so a point correction can be scored:
+	// "belongs to A" on a point A was given says the logic was right.
+	pointSides map[string]string
+
 	// Mock sessions carry what each generated hit was meant to be, so the side
 	// can be scored without anybody labelling it.
 	Intended      uint64
@@ -110,6 +114,7 @@ func (s *Sink) session(id string, now time.Time) (*Session, error) {
 		Players:     map[string]uint64{},
 		ByType:      map[string]uint64{},
 		RightByType: map[string]uint64{},
+		pointSides:  map[string]string{},
 	}
 	s.sessions[id] = se
 	return se, nil

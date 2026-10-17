@@ -152,8 +152,15 @@ func runMock(args []string) error {
 	wrong := fs.Float64("wrong", 0.15, "fraction of hits decided on the wrong side")
 	corrections := fs.Float64("corrections", 0.3,
 		"fraction of points that end as a tagged correction")
-	seed := fs.Int64("seed", 1, "so a run can be repeated")
+	seed := fs.Int64("seed", 1, "so a run can be repeated; 0 picks a fresh one")
 	fs.Parse(args)
+
+	// The seed also makes the session id, so two runs with the same seed are
+	// one session to the sink: the second lands in the first one's file. A
+	// sender that runs again and again (a CronJob in a lab) passes 0.
+	if *seed == 0 {
+		*seed = time.Now().UnixNano()
+	}
 
 	addr, err := net.ResolveUDPAddr("udp", *to)
 	if err != nil {
