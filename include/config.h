@@ -24,12 +24,14 @@
 #endif
 
 // --- zaehlwerk-api (#17, #41, #66, ADR-0008) --------------------------------
-// Where zaehlwerk-api is, without a trailing slash: http://10.0.0.5:8080. This
+// Where zaehlwerk-api is, without a trailing slash: https://zaehlwerk.<edge
+// domain> behind the Gateway, or http://10.0.0.5:8080 for a laptop. This
 // only seeds the board while NVS holds no address: once one is set or cleared
 // on the board's page, that wins (#66). Empty, as in a released image, means
 // the board reports nowhere and counts on its own, exactly as without this
 // feature. An IP or a name the router's DNS knows; a .local name is not
-// resolved by the HTTP client, and https is not supported yet.
+// resolved by the HTTP client. https is verified against the edge root only
+// (include/tls_trust_anchors.h).
 #ifndef ZW_API_URL
 #define ZW_API_URL ""
 #endif
@@ -38,6 +40,22 @@
 // `event_id` is per source and kept in NVS, so two boards need two names.
 #ifndef ZW_INGEST_SOURCE
 #define ZW_INGEST_SOURCE ZW_DEVICE_ID
+#endif
+
+// With an https address, wait for SNTP to set the clock before the first
+// request, and retry until then (ADR-0008). Note: the mbedTLS of this Arduino
+// core is built without MBEDTLS_HAVE_TIME_DATE, so it does not check the
+// certificate's validity dates at all, and a board at 1970 would verify. The
+// wait is kept anyway, so that a core built with date checks does not turn
+// into "not yet valid" at the table. 0 tries https without a clock.
+#ifndef ZW_TLS_WAIT_FOR_TIME
+#define ZW_TLS_WAIT_FOR_TIME 1
+#endif
+
+// Where SNTP asks first: the gateway DHCP handed out (on the table's box the
+// Opal router, which runs an NTP server), then this one.
+#ifndef ZW_NTP_FALLBACK
+#define ZW_NTP_FALLBACK "pool.ntp.org"
 #endif
 
 // The link to zaehlwerk-api runs on the core that does not sample (ADR-0003).

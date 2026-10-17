@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <esp_random.h>
+#include <time.h>
 
 #include "config.h"
 #include "diag.h"
@@ -30,6 +31,7 @@ TaskHandle_t task_ = nullptr;
 // before it is from the old server and is not read.
 volatile uint32_t generation_ = 0;
 bool announce_ = false;
+bool clockSaid_ = false;
 
 struct Guard {
   Guard() { xSemaphoreTake(lock_, portMAX_DELAY); }
@@ -115,6 +117,7 @@ void begin() {
     Guard g;
     link_.configure(true, millis());
   }
+  if (report::isHttps(ingest::baseUrl().c_str())) ingest::startClock();
   // Said in the log from the first tick(), not here: diag::begin() comes later
   // in setup(), and the session event has to stay the first of the session.
   announce_ = true;
@@ -128,6 +131,13 @@ void tick(void (*apply)(const report::State &), bool mock) {
     diag::link("address", ingest::urlOrigin(), "", 0, 0,
                String(",\"url\":\"") + ingest::baseUrl() + "\",\"source\":\"" +
                    ingest::source() + "\"");
+  }
+  // The moment SNTP set the clock, once: https waits for it, so a board that
+  // never gets here is a board whose events wait (ADR-0008).
+  if (!clockSaid_ && ingest::clockSet()) {
+    clockSaid_ = true;
+    diag::link("clock", "sntp", "", 0, 0, String(",\"unix\":") + (uint32_t)time(nullptr));
+    Serial.printf("[zaehlwerk] clock set by SNTP: %u\n", (unsigned)time(nullptr));
   }
   report::Record recs[8];
   size_t n = 0;
@@ -189,9 +199,18 @@ String statusJson(bool mock) {
     s = link_.status(millis());
   }
   const String url = ingest::baseUrl();
-  return String(report::statusJson(s, std::string(url.c_str()), ingest::source(),
-                                   ingest::lastEventId(), mock)
-                    .c_str());
+  String j = report::statusJson(s, std::string(url.c_str()), ingest::source(),
+                                ingest::lastEventId(), mock)
+                 .c_str();
+  // The heap, because a TLS connection needs some 40 KB of it in one piece:
+  // free now, the lowest since boot, and the largest block left.
+  j.remove(j.length() - 1);
+  j += ",\"tls\":" + String(report::isHttps(url.c_str()) ? "true" : "false");
+  j += ",\"clock\":" + String(ingest::clockSet() ? "true" : "false");
+  j += ",\"heap_free\":" + String(ESP.getFreeHeap());
+  j += ",\"heap_min\":" + String(ESP.getMinFreeHeap());
+  j += ",\"heap_block\":" + String(ESP.getMaxAllocHeap()) + "}";
+  return j;
 }
 
 bool setUrl(const String &url, String &message) {
@@ -219,6 +238,7 @@ bool setUrl(const String &url, String &message) {
   Serial.printf("[zaehlwerk] address %s on the page%s%s\n", on ? "set" : "cleared",
                 on ? ": " : "", on ? ingest::baseUrl().c_str() : "");
   if (on) {
+    if (report::isHttps(ingest::baseUrl().c_str())) ingest::startClock();
     startTask();
     wake();
     message = "Gespeichert. Das Board sucht jetzt das laufende Match.";

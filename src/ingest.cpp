@@ -3,9 +3,12 @@
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <string.h>
+#include <time.h>
 
 #include "config.h"
+#include "tls_trust_anchors.h"
 #include "report.h"
 
 namespace ingest {
@@ -68,6 +71,82 @@ void loadUrl() {
   }
 }
 
+// One client per scheme, kept between requests: the task is the only caller,
+// and a TLS handshake (RSA-2048 leaf, ECDSA intermediate and root, ECDHE) is
+// the expensive part of a request on an ESP32, in time and in heap. With the
+// connection kept open, a board that polls every two seconds does it once.
+HTTPClient http_;
+WiFiClient plain_;
+WiFiClientSecure *secure_ = nullptr;
+String connectedTo_;  // the base URL the open connection belongs to
+int lastTlsError_ = 0;
+
+void closeAll() {
+  plain_.stop();
+  if (secure_) {
+    secure_->stop();
+    delete secure_;
+    secure_ = nullptr;
+  }
+}
+
+// The client for this request: the open connection if there is one to the
+// same address, otherwise a fresh one. A fresh TLS client trusts the edge root
+// and nothing else; there is no path in this file that calls setInsecure().
+WiFiClient &clientFor(const String &base, bool tls, bool *reused) {
+  if (base != connectedTo_) {
+    closeAll();
+    connectedTo_ = base;
+  }
+  if (!tls) {
+    *reused = plain_.connected();
+    return plain_;
+  }
+  if (secure_ && secure_->connected()) {
+    *reused = true;
+    return *secure_;
+  }
+  *reused = false;
+  delete secure_;
+  secure_ = new WiFiClientSecure();
+  secure_->setCACert(TLS_TRUST_ANCHORS_PEM);
+  // The default is two minutes; a handshake that has not finished in ten
+  // seconds is a network that lost packets, and the queue waits behind it.
+  secure_->setHandshakeTimeout(10);
+  return *secure_;
+}
+
+int once(WiFiClient &client, bool tls, const char *method, const String &url,
+         const std::string *body, std::string &answer, uint32_t timeoutMs) {
+  http_.setReuse(true);
+  // Connecting is quick or it is not happening. The answer gets a few seconds:
+  // zaehlwerk answers in milliseconds, and a gateway with nobody behind it
+  // answers 503 at once, so a long wait here is a network that lost packets.
+  http_.setConnectTimeout(tls ? 10000 : CONNECT_TIMEOUT_MS);
+  http_.setTimeout(timeoutMs);
+  if (!http_.begin(client, url)) return report::NO_ANSWER;
+  int status;
+  if (body) {
+    http_.addHeader("Content-Type", "application/json");
+    status = http_.sendRequest(method, reinterpret_cast<uint8_t *>(const_cast<char *>(body->data())),
+                               body->size());
+  } else {
+    status = http_.sendRequest(method);
+  }
+  if (status > 0) {
+    const int size = http_.getSize();
+    if (size <= ANSWER_MAX) answer = http_.getString().c_str();
+    // An answer left unread would be the start of the next one on a kept
+    // connection, so a body too large to read closes it.
+    else client.stop();
+    if ((int)answer.size() > ANSWER_MAX) answer.clear();
+  }
+  // Keeps the connection open when the server allows it (HTTP/1.1, no
+  // "Connection: close"), closes it otherwise.
+  http_.end();
+  return status;
+}
+
 int request(const char *method, const char *path, const std::string *body, std::string &answer,
             uint32_t timeoutMs) {
   answer.clear();
@@ -75,32 +154,47 @@ int request(const char *method, const char *path, const std::string *body, std::
   if (!base.length()) return report::NO_ANSWER;
   // The two failures that look identical from the table and have different
   // fixes: no network at all, or a network and nobody answering on it.
-  if (WiFi.status() != WL_CONNECTED) return report::NO_WIFI;
+  if (WiFi.status() != WL_CONNECTED) {
+    closeAll();
+    return report::NO_WIFI;
+  }
+  const bool tls = report::isHttps(base.c_str());
+#if ZW_TLS_WAIT_FOR_TIME
+  if (tls && !clockSet()) return report::NO_TIME;
+#endif
+  const String url = base + path;
 
-  WiFiClient client;
-  HTTPClient http;
-  http.setReuse(false);
-  // Connecting is quick or it is not happening. The answer gets a few seconds:
-  // zaehlwerk answers in milliseconds, and a gateway with nobody behind it
-  // answers 503 at once, so a long wait here is a network that lost packets.
-  http.setConnectTimeout(CONNECT_TIMEOUT_MS);
-  http.setTimeout(timeoutMs);
-  if (!http.begin(client, base + path)) return report::NO_ANSWER;
-  int status;
-  if (body) {
-    http.addHeader("Content-Type", "application/json");
-    status = http.sendRequest(method, reinterpret_cast<uint8_t *>(const_cast<char *>(body->data())),
-                              body->size());
-  } else {
-    status = http.sendRequest(method);
+  bool reused = false;
+  int status = once(clientFor(base, tls, &reused), tls, method, url, body, answer, timeoutMs);
+  if (status <= 0 && reused) {
+    // A kept connection the server or the Gateway closed while it idled. Once
+    // more on a fresh one, at once: the request is the same, with the same
+    // event_id, so if the first did arrive the second is a duplicate.
+    closeAll();
+    connectedTo_ = base;
+    answer.clear();
+    status = once(clientFor(base, tls, &reused), tls, method, url, body, answer, timeoutMs);
   }
   if (status > 0) {
-    const int size = http.getSize();
-    if (size <= ANSWER_MAX) answer = http.getString().c_str();
-    if ((int)answer.size() > ANSWER_MAX) answer.clear();
+    lastTlsError_ = 0;
+    return status;
   }
-  http.end();
-  return status > 0 ? status : report::NO_ANSWER;
+
+  // Nobody answered. With TLS, say whether the certificate was the reason, and
+  // print mbedTLS's reason once per change rather than on every retry.
+  int code = 0;
+  if (tls && secure_) {
+    char why[96] = {0};
+    code = secure_->lastError(why, sizeof(why));
+    if (code < -1 && code != lastTlsError_)
+      Serial.printf("[zaehlwerk] TLS to %s failed: %s (-0x%04x)\n", base.c_str(), why, -code);
+  }
+  lastTlsError_ = code;
+  closeAll();
+  connectedTo_ = base;
+  // -1 is a TCP connect that failed or a handshake that timed out; anything
+  // below is mbedTLS refusing, the certificate check among it.
+  return code < -1 ? report::TLS_FAILED : report::NO_ANSWER;
 }
 
 }  // namespace
@@ -202,6 +296,23 @@ bool persistThrough(uint32_t id) {
   if (id > persisted_) persisted_ = id;
   portEXIT_CRITICAL(&lock_);
   return true;
+}
+
+void startClock() {
+  static bool started = false;
+  // SNTP keeps pointers to its server names, so they live here for good.
+  static char gateway[16] = {0};
+  if (started || WiFi.status() != WL_CONNECTED) return;
+  started = true;
+  strncpy(gateway, WiFi.gatewayIP().toString().c_str(), sizeof(gateway) - 1);
+  // UTC: the board shows no time, it only needs one a certificate accepts.
+  configTime(0, 0, gateway, ZW_NTP_FALLBACK);
+  Serial.printf("[zaehlwerk] SNTP: asking %s, then %s\n", gateway, ZW_NTP_FALLBACK);
+}
+
+bool clockSet() {
+  // 2026-01-01T00:00:00Z. Anything before is the clock counting from 1970.
+  return time(nullptr) >= 1767225600;
 }
 
 int get(const char *path, std::string &answer, uint32_t timeoutMs) {

@@ -49,8 +49,17 @@ uint32_t nextEventId();
 // if NVS could not be written, in which case the request must not go.
 bool persistThrough(uint32_t id);
 
+// SNTP, for https only (ADR-0008): started once an https address is in force,
+// never for http, so a board without one keeps a clock at 1970 as before.
+// Asks the gateway DHCP handed out first, then ZW_NTP_FALLBACK.
+void startClock();
+// The clock has been set by SNTP (it reads 2026 or later).
+bool clockSet();
+
 // GET and POST against baseUrl() + path. Return the HTTP status, or
-// report::NO_WIFI / report::NO_ANSWER when nobody answered. `answer` holds the
+// report::NO_WIFI / report::NO_ANSWER when nobody answered,
+// report::TLS_FAILED when the server's certificate did not verify against the
+// trust anchors, or report::NO_TIME when https waits for the clock. `answer` holds the
 // body of the response.
 int get(const char *path, std::string &answer, uint32_t timeoutMs);
 int post(const char *path, const std::string &body, std::string &answer, uint32_t timeoutMs);
