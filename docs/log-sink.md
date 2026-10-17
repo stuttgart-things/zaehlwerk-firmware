@@ -226,6 +226,40 @@ keeps every version ([ADR-0005](adr/0005-labels-are-append-only-records.md)).
 The summary is rebuilt from the file rather than taken from the running sink, so
 it works on a session copied off a laptop weeks later.
 
+## Running it in a cluster
+
+The same binary ships as an image, `ghcr.io/stuttgart-things/zaehlwerk-log-sink`
+(`.github/workflows/sink-image.yml`, built with ko: distroless, non-root, amd64
+and arm64). Every push to `main` that touches `tools/log-sink` publishes `main`
+and `sha-<commit>`; a release tag publishes the tag and `latest`. Pin the
+`sha-` tag in a cluster, since `main` moves.
+
+The image runs as uid 65532 with `/` read-only, so the data directory has to be
+a mounted volume:
+
+```
+args: ["-listen", ":9000", "-viewer", ":9001", "-dir", "/data"]
+```
+
+Two things a cluster has to get right, both because the board talks UDP:
+
+- **The board needs an address it can send to** -- a LoadBalancer Service with
+  a fixed IP on the table's network (UDP 9000), not a name behind an HTTP
+  gateway. Point the board at it as at a laptop:
+  `curl "http://zaehlwerk.local/diag?host=<that IP>&port=9000&on=1"`.
+- **The `pong` has to find its way back.** The sink answers the source address
+  of the `ping`, and the board holds everything it produces until an answer
+  arrives on its port (`src/diag.cpp`, `lauschen`). Behind a LoadBalancer the
+  source the pod sees may be translated; the answer still reaches the board as
+  long as the load balancer's connection tracking reverses it. A board that
+  shows "does not answer" while the sink logs its pings is losing the answer
+  on the way back.
+
+The viewer (TCP 9001) has no login and only reads; it can sit behind the
+cluster's internal gateway. On the table's box (harvester
+`clusters/sthings-edge`) that is `https://log-sink.edge.sthings.lab`, and the
+board sends to `192.168.8.23`.
+
 ## Limits worth knowing
 
 - **Labelling is not here yet** — that is
