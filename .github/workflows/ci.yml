@@ -137,7 +137,9 @@ jobs:
           hdr = pathlib.Path("include/config.h").read_text()
 
           # These must be empty, or a published binary carries somebody's network.
-          for name in ("ZW_STA_PASS", "ZW_OTA_PASS", "ZW_STA_SSID"):
+          # ZW_API_URL too: reporting to zaehlwerk is opt-in (ADR-0008), and a
+          # released image that reported somewhere by itself would not be.
+          for name in ("ZW_STA_PASS", "ZW_OTA_PASS", "ZW_STA_SSID", "ZW_API_URL"):
               m = re.search(rf'#define\s+{name}\s+"([^"]*)"', hdr)
               if m is None or m.group(1) != "":
                   sys.exit(f"{name} has a baked-in default: {m and m.group(1)!r}")

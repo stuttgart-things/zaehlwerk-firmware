@@ -107,6 +107,20 @@ void point(uint32_t pointId, uint32_t rallyId, const String &reason,
 // every later point resolvable.
 void match(const char *phase, const String &nameA, const String &nameB,
            int sideAPlayer, int sideBPlayer, int setNumber);
+// The delivery record of one event to zaehlwerk-api (#17, #67, #69): queued,
+// acked, sent again, or dropped and why. `action` is "point" or "undo";
+// pointId and rallyId tie it to the board's own point and rally, 0 for none.
+// The contract fields are the ones that went over the wire, nothing else.
+void ingest(const char *status, const char *reason, const char *action, uint32_t eventId,
+            char half, int delta, const char *matchId, const char *source, int http,
+            uint16_t attempt, uint32_t queuedMs, uint32_t waitMs, uint32_t pointId,
+            uint32_t rallyId);
+// Where the board stands with zaehlwerk-api: an address set or cleared, a match
+// joined or left, a demo waited out, zaehlwerk unreachable and back, a score
+// taken over from it. `extra` is a JSON fragment that starts with a comma, or
+// empty.
+void link(const char *phase, const char *reason, const char *matchId, int http, uint32_t tries,
+          const String &extra);
 void param(const char *name, const String &from, const String &to, const char *by);
 void note(const char *level, const String &text);
 

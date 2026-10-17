@@ -327,3 +327,44 @@ func TestPointsAreCountedByThePlayerTheyResolvedTo(t *testing.T) {
 		t.Errorf("players = %v, an undo must not award anybody", sum.Players)
 	}
 }
+
+// The delivery records to zaehlwerk-api (ingest) and the state of the link
+// (link) are types the sink was written before. It stores and counts them like
+// any other event, adds no gap for them, and splitting games reads past them.
+func TestTheZaehlwerkLinkRecordsAreStoredLikeAnyOtherEvent(t *testing.T) {
+	s, dir := newTestSink(t)
+	now := time.Now()
+	for i, ev := range []string{
+		`"type":"link","phase":"joined","match_id":"c462e62c","players":{"a":"Pat","b":"Ana"},"set_number":1`,
+		`"type":"point","reason":"last_bounce","side":"A","player":"a","player_name":"Pat","to":{"a":1,"b":0,"serve":"A","over":false}`,
+		`"type":"ingest","status":"queued","action":"point","point_id":"aa-p1","match_id":"c462e62c","source":"piezo-1","side":"A","half":"left","delta":1,"event_id":42,"queued_ms":0`,
+		`"type":"ingest","status":"retry","reason":"unavailable","action":"point","match_id":"c462e62c","source":"piezo-1","side":"A","half":"left","delta":1,"event_id":42,"http":503,"attempt":1,"queued_ms":3,"retry_in_ms":1200`,
+		`"type":"ingest","status":"acked","action":"point","match_id":"c462e62c","source":"piezo-1","side":"A","half":"left","delta":1,"event_id":42,"http":200,"attempt":2,"queued_ms":1210`,
+		`"type":"link","phase":"back","match_id":"c462e62c","tries":1,"after_ms":1207`,
+	} {
+		s.Handle([]byte(fmt.Sprintf(`{"v":1,"session_id":"aa","seq":%d,`, i+1)+ev+`}`), nil, now)
+	}
+	s.Close()
+
+	got := lines(t, dir)
+	if len(got) != 6 {
+		t.Fatalf("expected six records, got %d", len(got))
+	}
+	for _, l := range got {
+		if strings.Contains(l, `"kind":"gap"`) {
+			t.Errorf("a gap was reported for records that all arrived: %s", l)
+		}
+	}
+	sum := s.Sessions()[0].Summary()
+	if sum.Events["ingest"] != 3 || sum.Events["link"] != 2 {
+		t.Errorf("events = %v, want ingest 3 and link 2", sum.Events)
+	}
+	m, _ := filepath.Glob(filepath.Join(dir, "*", "sessions", "*.jsonl"))
+	games, err := splitGames(m[0], false)
+	if err != nil {
+		t.Fatalf("splitting games: %v", err)
+	}
+	if len(games) != 1 {
+		t.Errorf("expected the one point to make one game, got %d", len(games))
+	}
+}

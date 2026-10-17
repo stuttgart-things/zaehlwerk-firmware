@@ -230,7 +230,7 @@ the export instead of invalidating the session.
 
 ```json
 { "type": "match", "phase": "ends_swapped",
-  "match_id": "m-7f2a91", "set_number": 2,
+  "set_number": 2,
   "players": { "a": "Pat", "b": "Ana" },
   "sides":   { "A": "b", "B": "a" } }
 ```
@@ -239,9 +239,9 @@ the export instead of invalidating the session.
 `end`. `sides` is the mapping in force from this event onwards; it is what
 makes every later `point` resolvable.
 
-`match_id` appears once the firmware creates the match at the API
-([#17](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/17)).
-Until then the field is absent and the session stands on its own.
+`match_id` is not on this event yet
+([#42](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/42)); the
+match the board joined at zaehlwerk is on the `link` events below.
 
 **Names are optional.** Without them everything keeps saying `A` and `B`, and
 `players` carries empty strings. For doubles both names go in one field —
@@ -251,17 +251,58 @@ be a data model for something only the display cares about.
 ## `ingest` — what was sent to the API, and what came back
 
 Not a duplicate of `point`: this is the delivery record, and the place an
-offline queue becomes visible.
+offline queue becomes visible
+([#17](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/17),
+[ADR-0008](adr/0008-reporting-to-zaehlwerk-is-opt-in-and-zaehlwerk-owns-the-score.md)).
+Only written when the board has a zaehlwerk address; a board without one never
+emits it.
 
 ```json
-{ "type": "ingest", "point_id": "8f3a2c11-p23",
-  "match_id": "m-7f2a91", "source": "piezo-tisch-1",
-  "player": "a", "delta": 1, "event_id": 42,
-  "status": "sent", "http": 200, "attempt": 1, "queued_ms": 0 }
+{ "type": "ingest", "status": "retry", "reason": "unavailable",
+  "action": "point", "point_id": "8f3a2c11-p23", "rally_id": "8f3a2c11-r41",
+  "match_id": "c462e62c", "source": "piezo-1",
+  "side": "A", "half": "left", "delta": 1, "event_id": 42,
+  "http": 503, "attempt": 1, "queued_ms": 4, "retry_in_ms": 1384 }
 ```
 
-`status` is `sent`, `queued`, `retry` or `failed`. The five fields above
-`status` are exactly the ingest contract; nothing else is sent.
+| Field | |
+| --- | --- |
+| `status` | `queued` when it enters the queue; then, per attempt, exactly one of `acked`, `retry` or `dropped`. There is no separate `sent`: every send ends in one of the three |
+| `reason` | for `retry`: `no_wifi`, `no_answer`, `bad_gateway`, `unavailable`, `gateway_timeout`, `server_error` (any other 5xx), `tls` (the certificate did not verify against the edge root; nothing was sent), `no_time` (https waits for SNTP; nothing was sent), `nvs` (the id could not be stored, so it was not sent). For `dropped`: `match_over` (404/409), `refused` (any other answer), `queue_full`, `phase` (a detected rally during warm-up or a change of ends, not sent), `address_changed`, `address_cleared` |
+| `action` | `point` or `undo` ([zaehlwerk ADR-0012](https://github.com/stuttgart-things/zaehlwerk/blob/main/docs/adr/0012-taking-a-point-back-through-the-ingest-contract.md)) |
+| `point_id`, `rally_id` | the board's own point and rally this came from. Absent for a rally that awarded nothing (`delta: 0`, only `rally_id`) and for an undo that took nothing back locally |
+| `match_id`, `source`, `half`, `delta`, `event_id` | exactly what went over the wire. An undo has no `half` and no `delta`. `side` is the same half in the log's own spelling |
+| `http` | the status zaehlwerk or its gateway answered; absent when nobody answered |
+| `attempt` | how many times this event has been sent so far |
+| `queued_ms` | how long it had been waiting |
+| `retry_in_ms` | for `retry`: when it goes again |
+
+The `event_id` of a `retry` and of the `acked` after it are the same: a resend
+is never renumbered (zaehlwerk ADR-0002). A `dropped` with `reason` `phase`,
+`match_over` or `queue_full` and no `event_id` was never given one.
+
+## `link` — where the board stands with zaehlwerk
+
+Also only with a zaehlwerk address.
+
+```json
+{ "type": "link", "phase": "joined", "match_id": "c462e62c",
+  "http": 200, "players": { "a": "Pat", "b": "Ana" }, "set_number": 1 }
+```
+
+| `phase` | |
+| --- | --- |
+| `address` | an address is in force: at boot (`reason` says where it came from: `NVS`, `secrets.ini`), or `set` / `cleared` on the page. Carries `url`, and `source` at boot |
+| `joined` | the board joined a running match. Carries the players and the set |
+| `left` | it is out of that match: `reason` `no_match` (ended on the page), `match_over`, or `demo` (a demo became current) |
+| `waiting`, `demo` | no match, or a demo, while the board was not in one |
+| `unreachable` | the first failed request in a row. `reason` as for `ingest` `retry`, `retry_in_ms` |
+| `back` | the first answer after that. `tries` failed requests, `after_ms` how long it took. A rollout reads as one `unreachable` and one `back` |
+| `clock` | SNTP set the clock, once per boot, with `unix`. https waits for it |
+| `adopted` | the board took zaehlwerk's score in place of its own count, because they differed. `from` and `to` carry `a`, `b` (points by half), `serve` and `set_number`; `to` also `over` |
+
+`adopted` is what explains a score that changed with no `point` before it:
+an undo on the phone, a set won at zaehlwerk, a point the board did not hear.
 
 ## `sync` — a marker for lining up a phone video
 
@@ -378,7 +419,7 @@ afterwards.
 | `rally_id` | `<session_id>-r<n>` | firmware |
 | `point_id` | `<session_id>-p<n>` | firmware |
 | `event_id` (ingest) | integer, monotonic per source | firmware, survives reflash in NVS |
-| `match_id` | `m-7f2a91` | zaehlwerk-api, on `POST /matches` |
+| `match_id` | `c462e62c` | zaehlwerk-api, on `POST /matches` |
 | `label_id` | `l-<n>` | sink |
 
 The ingest `event_id` is the one that is not like the others: it is a plain

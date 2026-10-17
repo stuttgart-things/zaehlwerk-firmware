@@ -23,8 +23,9 @@ One PlatformIO project. Two of the planned environments are written:
 | `button` | ESP32-C3 Super Mini | Battery, deep sleep | Wake on press, send, sleep | [#2](../../issues/2) |
 | `hub` | ESP32 | Mains | Receive, forward over HTTP | [#3](../../issues/3) |
 
-Per-unit configuration — source id, hub MAC, wifi, API URL — is set by build
-flag, not by editing source.
+Per-unit configuration — source id, hub MAC, wifi — is set by build flag, not
+by editing source. The wifi and the zaehlwerk address can also be set on the
+board's page and are then kept in NVS.
 
 ## Tooling
 
@@ -110,6 +111,130 @@ A board with no filesystem is not bricked. It answers `/` with **HTTP 503** and 
 recovery page that can upload either image itself, so the way back does not need
 a cable.
 
+## Reporting to zaehlwerk-api
+
+**Off unless the board is given an address.** Without one the board counts on
+its own, shows the score on its page and sends the diagnostic log to the sink,
+exactly as v0.2.2 does: no task is started, nothing is sent to zaehlwerk and
+nothing new goes into the log. Released images carry no address, and CI checks
+that. Why it is built this way, and who owns the score once the board is
+connected:
+[ADR-0008](docs/adr/0008-reporting-to-zaehlwerk-is-opt-in-and-zaehlwerk-owns-the-score.md).
+
+### Setting the address
+
+On the board's page, card **Zaehlwerk-Server**: enter the address and press
+*Speichern*. On the table's box and in the lab that is
+`https://zaehlwerk.<edge domain>`, zaehlwerk behind the Gateway; for a
+zaehlwerk on a laptop `http://<laptop IP>:8080`. It applies at once, no restart,
+and is kept in NVS. *Trennen* clears it, and it stays cleared across a reboot.
+Or from a laptop on the same network:
+
+```bash
+curl -4 -s -X POST --data-urlencode "url=https://zaehlwerk.edge.sthings.lab" http://zaehlwerk.local/zaehlwerk/url
+curl -4 -s -X POST --data-urlencode "url=" http://zaehlwerk.local/zaehlwerk/url   # clear
+curl -4 -s http://zaehlwerk.local/zaehlwerk                                        # state as JSON
+```
+
+The board refuses, and says why: anything but `https://` or `http://`, a
+`.local` name (its HTTP client asks DNS, not mDNS: use the IP or a name
+dnsmasq or the router's DNS knows), a path after the port, spaces or umlauts.
+
+**https** is verified against the stuttgart-things edge root CA and nothing
+else (`include/tls_trust_anchors.h`, a public certificate copied from
+harvester's `clusters/edge/edge-root-ca.crt`), hostname included. There is no
+insecure fallback: a certificate that does not chain to the edge root means no
+request, and the card says *Zertifikat passt nicht zur Edge-Root-CA*. The board
+sets its clock over SNTP (the DHCP gateway, then `pool.ntp.org`), but https
+does not wait for it: this core's mbedTLS never checks validity dates
+(ADR-0008, `ZW_TLS_WAIT_FOR_TIME`). The card shows whether the clock is set. To check the embedded root against the source, and the Gateway against
+it:
+
+```bash
+sed -n '/^-----BEGIN/,/^-----END/p' include/tls_trust_anchors.h > /tmp/edge-root.pem
+cmp /tmp/edge-root.pem ../harvester/clusters/edge/edge-root-ca.crt
+openssl s_client -connect <gateway IP>:443 -servername zaehlwerk.<edge domain> \
+  -CAfile /tmp/edge-root.pem -verify_hostname zaehlwerk.<edge domain> </dev/null | grep Verify
+```
+
+`/zaehlwerk` also reports `heap_free`, `heap_min` and `heap_block`: a TLS
+connection needs about 40 KB, and is kept open between requests.
+
+A board built from source can be seeded from `secrets.ini`
+(`-DZW_API_URL='"https://zaehlwerk.edge.sthings.lab"'`, see
+`secrets.ini.example`). Like the
+wifi credentials, the seed is used only while NVS holds no address; once one is
+set or cleared on the page, that wins. `-DZW_INGEST_SOURCE` names the board in
+the ingest contract (default: `ZW_DEVICE_ID`, `piezo-1`); two boards need two
+names.
+
+### What the page shows
+
+Under the score, once an address is set: `⇄ Zaehlwerk-Match <id>` while the
+board is in a match (with the phase, *Einspielen*, *um die Angabe*,
+*Seitenwechsel*, and how many events wait), or *kein Match*, *Demo laeuft*,
+*nicht erreichbar*. The card says the same in full: not configured / waiting
+for a match / a demo running / in match `<id>` with the players / match over /
+server unreachable with the reason and when it tries again, and below it the
+address, the source, how many events were delivered, are waiting and were
+dropped, the last `event_id` and the last error.
+
+### What the board does with an address
+
+- It asks `GET /matches/current` every two seconds. No match, or a demo, and it
+  waits and keeps counting on its own; nothing is sent. A real match, started
+  on zaehlwerk's page, and it joins it. The board never creates a match.
+- Joined, every rally `lib/game` awards goes to `POST /ingest/piezo` as the
+  board's half (`left`/`right`) with `delta: 1`; a rally it awards to nobody as
+  `delta: 0`; *Punkt A/B* on the page as `delta: 1`; *Letzten zurück* as
+  `"action": "undo"`. Never `POST /matches/{id}/undo` (#67).
+- zaehlwerk owns the score. The board still counts at once, then takes points,
+  sets, serve, names and ends from zaehlwerk's answer, so an undo on the phone
+  shows on the board within two seconds, and the next rally is judged against
+  zaehlwerk's server. *Seiten wechseln* is hidden while joined: zaehlwerk keeps
+  the ends.
+- During warm-up and a change of ends a detected rally is not sent, because
+  there a press confirms a side; a point given by hand is.
+- Nothing is sent in mock mode.
+- No answer, no wifi, or any 5xx (a rollout's 502/503/504, or a 500): the same
+  event again with the same `event_id`, after 1 s doubling to 30 s. Events wait
+  in order in a queue of 64. A 404/409 (match over) drops what was queued for
+  that match; any other refusal drops that one event. Every step is in the
+  diagnostic log as `ingest` and `link` events
+  ([docs/event-schema.md](docs/event-schema.md)).
+- The `event_id` counter is in NVS and stored before an event first goes out,
+  so a reboot never sends an id twice. The queue itself is RAM: a reboot loses
+  what was not yet delivered.
+
+### Trying it
+
+**Against a zaehlwerk on the laptop.** In a checkout of
+[zaehlwerk](https://github.com/stuttgart-things/zaehlwerk):
+
+```bash
+go build -o /tmp/zaehlwerk-api ./cmd/zaehlwerk-api
+HTTP_ADDR=0.0.0.0:8080 /tmp/zaehlwerk-api
+```
+
+Give the board `http://<laptop IP>:8080` (the laptop's address on the board's
+wifi, not `localhost`). Start a match on `http://localhost:8080/` or with
+`curl -s -X POST -d '{"players":["Pat","Ana"],"best_of":3}' localhost:8080/matches`.
+Within two seconds the card says *Im Match*, and a tap on the table or *Punkt A*
+on the board shows up on zaehlwerk's page. An undo there shows up on the board.
+A firewall on the laptop has to let port 8080 in.
+
+**Against the lab's zaehlwerk.** `https://zaehlwerk.<edge domain>` on the
+card, a name the board's DNS resolves to the Gateway. The card should show
+*TLS, Uhrzeit gesetzt* and then *Im Match* once a match runs. Only a match started there is joined. To check #69, the rollout: with a
+match running that nobody is really playing, `kubectl -n zaehlwerk rollout
+restart deploy/zaehlwerk`, keep scoring, and compare zaehlwerk's events with
+the sink's `ingest` records afterwards: no point missing, none twice. The log
+shows one `link`/`unreachable` and one `link`/`back` around the gap.
+
+**Upgrading a board that runs v0.2.2.** Flash this build without an address
+first; it behaves as v0.2.2 did. Then set the address on the page. Clearing it
+puts the board back.
+
 ## Continuous integration
 
 | Workflow | When | What |
@@ -152,6 +277,7 @@ discards all but the first as duplicates — see
 | [0004](docs/adr/0004-diagnostic-log-over-udp-to-a-sink.md) | Diagnostic log over UDP to a sink, beside the API path |
 | [0005](docs/adr/0005-labels-are-append-only-records.md) | Labels are append-only records that point at events |
 | [0006](docs/adr/0006-the-firmware-owns-the-half-to-player-mapping.md) | The firmware owns the table half to player mapping |
+| [0008](docs/adr/0008-reporting-to-zaehlwerk-is-opt-in-and-zaehlwerk-owns-the-score.md) | Reporting to zaehlwerk is opt-in, and once joined zaehlwerk owns the score |
 
 What the events look like: [docs/event-schema.md](docs/event-schema.md).
 

@@ -387,6 +387,40 @@ void match(const char *phase, const String &nameA, const String &nameB,
   emitNow("match", f);
 }
 
+void ingest(const char *status, const char *reason, const char *action, uint32_t eventId,
+            char half, int delta, const char *matchId, const char *source, int http,
+            uint16_t attempt, uint32_t queuedMs, uint32_t waitMs, uint32_t pointId,
+            uint32_t rallyId) {
+  String f = String(",\"status\":\"") + status + "\"";
+  if (reason && reason[0]) f += String(",\"reason\":\"") + reason + "\"";
+  f += String(",\"action\":\"") + action + "\"";
+  if (pointId) f += String(",\"point_id\":\"") + sessionId_ + "-p" + pointId + "\"";
+  if (rallyId) f += String(",\"rally_id\":\"") + sessionId_ + "-r" + rallyId + "\"";
+  if (matchId && matchId[0]) f += String(",\"match_id\":\"") + esc(matchId) + "\"";
+  f += String(",\"source\":\"") + esc(source) + "\"";
+  if (half == 'A' || half == 'B') {
+    f += String(",\"side\":\"") + half + "\",\"half\":\"" + (half == 'A' ? "left" : "right") + "\"";
+    f += String(",\"delta\":") + delta;
+  }
+  if (eventId) f += String(",\"event_id\":") + eventId;
+  if (http) f += String(",\"http\":") + http;
+  if (attempt) f += String(",\"attempt\":") + attempt;
+  f += String(",\"queued_ms\":") + queuedMs;
+  if (waitMs) f += String(",\"retry_in_ms\":") + waitMs;
+  emitNow("ingest", f);
+}
+
+void link(const char *phase, const char *reason, const char *matchId, int http, uint32_t tries,
+          const String &extra) {
+  String f = String(",\"phase\":\"") + phase + "\"";
+  if (reason && reason[0]) f += String(",\"reason\":\"") + reason + "\"";
+  if (matchId && matchId[0]) f += String(",\"match_id\":\"") + esc(matchId) + "\"";
+  if (http) f += String(",\"http\":") + http;
+  if (tries) f += String(",\"tries\":") + tries;
+  f += extra;
+  emitNow("link", f);
+}
+
 void param(const char *name, const String &from, const String &to, const char *by) {
   emitNow("param", String(",\"name\":\"") + name + "\",\"from\":\"" + esc(from) +
                        "\",\"to\":\"" + esc(to) + "\",\"by\":\"" + by + "\"");

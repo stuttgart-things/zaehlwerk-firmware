@@ -378,6 +378,7 @@ tasks:
         echo "Version: $(curl -4 -s -m 5 http://{{.ESP_HOST}}/version)"
         echo "Network: $(curl -4 -s -m 5 http://{{.ESP_HOST}}/net)"
         echo "State:   $(curl -4 -s -m 5 http://{{.ESP_HOST}}/state)"
+        echo "Zaehlwerk: $(curl -4 -s -m 5 http://{{.ESP_HOST}}/zaehlwerk)"
 
   ## ──────────────────────────────────────────────
   ## OVER THE AIR
