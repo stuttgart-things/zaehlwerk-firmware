@@ -1,0 +1,61 @@
+# The log sink as a container image, so it can run next to zaehlwerk on the
+# table's box instead of on a laptop that has to stay awake for a whole match.
+# Built with ko from tools/log-sink (its own go.mod): distroless, non-root,
+# amd64 and arm64.
+#
+# Tags: every push to main publishes `main` and `sha-<commit>` -- a cluster
+# pins the second, since `main` moves. A release tag (v*) publishes the tag
+# and `latest`. A pull request builds without pushing, so a broken build shows
+# up before the merge.
+name: sink-image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - tools/log-sink/**
+      - .github/workflows/sink-image.yml
+  pull_request:
+    paths:
+      - tools/log-sink/**
+      - .github/workflows/sink-image.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-pr:
+    if: github.event_name == 'pull_request'
+    uses: stuttgart-things/github-workflow-templates/.github/workflows/call-ko-build.yaml@main
+    with:
+      go-version: '1.24'
+      working-directory: tools/log-sink
+      build-path: .
+      registry: ghcr.io
+      image-repo: stuttgart-things/zaehlwerk-log-sink
+      ref: ${{ github.event.pull_request.head.sha }}
+      tags: pr-${{ github.event.number }}
+      push: false
+    secrets: inherit # pragma: allowlist secret
+
+  build:
+    if: github.event_name != 'pull_request'
+    uses: stuttgart-things/github-workflow-templates/.github/workflows/call-ko-build.yaml@main
+    with:
+      go-version: '1.24'
+      working-directory: tools/log-sink
+      build-path: .
+      registry: ghcr.io
+      image-repo: stuttgart-things/zaehlwerk-log-sink
+      tags: >-
+        ${{ github.ref_type == 'tag'
+            && format('{0},latest', github.ref_name)
+            || format('main,sha-{0}', github.sha) }}
+    secrets: inherit # pragma: allowlist secret
