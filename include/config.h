@@ -16,6 +16,36 @@
 #define ZW_PIN_B 35  // piezo under half B
 #endif
 
+// Which core samples. The sketch's arrangement is core 0; ADR-0003 moves it to
+// core 1, and #33 is where that is being tried. Whatever it is, the link to
+// zaehlwerk-api below stays off it.
+#ifndef ZW_SENSOR_CORE
+#define ZW_SENSOR_CORE 0
+#endif
+
+// --- zaehlwerk-api (#17, #41, #66, ADR-0008) --------------------------------
+// Where zaehlwerk-api is, without a trailing slash: http://10.0.0.5:8080. This
+// only seeds the board while NVS holds no address: once one is set or cleared
+// on the board's page, that wins (#66). Empty, as in a released image, means
+// the board reports nowhere and counts on its own, exactly as without this
+// feature. An IP or a name the router's DNS knows; a .local name is not
+// resolved by the HTTP client, and https is not supported yet.
+#ifndef ZW_API_URL
+#define ZW_API_URL ""
+#endif
+
+// The `source` of the ingest contract (zaehlwerk ADR-0002). The counter behind
+// `event_id` is per source and kept in NVS, so two boards need two names.
+#ifndef ZW_INGEST_SOURCE
+#define ZW_INGEST_SOURCE ZW_DEVICE_ID
+#endif
+
+// The link to zaehlwerk-api runs on the core that does not sample (ADR-0003).
+// Not a fixed number on purpose: today that is core 1, once #33 lands core 0.
+#ifndef ZW_REPORT_CORE
+#define ZW_REPORT_CORE (ZW_SENSOR_CORE == 0 ? 1 : 0)
+#endif
+
 // --- network --------------------------------------------------------------
 // The name for mDNS and for espota — zaehlwerk.local once name resolution is
 // in place (#14).

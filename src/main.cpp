@@ -89,9 +89,8 @@ QueueHandle_t queue;
 // moves to core 1, where nothing else runs. Core 1's idle task is not watched by
 // the watchdog in this build, so a tight loop there is survivable; on core 0 it
 // would starve wifi and lwIP.
-#ifndef ZW_SENSOR_CORE
-#define ZW_SENSOR_CORE 0
-#endif
+// ZW_SENSOR_CORE is in include/config.h, because the link to zaehlwerk-api has
+// to know which core to stay off.
 // How many readings between one tick of sleep. A bare taskYIELD() here starved
 // core 1's idle task: the image booted, confirmed itself valid after the ten
 // second probation and then crash-looped every thirty-five seconds — past the
