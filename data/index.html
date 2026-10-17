@@ -215,13 +215,15 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   <div class="ni" id="zi">&hellip;</div>
   <div class="net" style="margin-top:10px">
     <label style="margin:0">Adresse</label>
-    <input type="text" id="zu" autocomplete="off" placeholder="http://192.168.178.20:8080">
+    <input type="text" id="zu" autocomplete="off" placeholder="https://zaehlwerk.edge.sthings.lab">
     <div class="row">
       <button onclick="zwSpeichern(zu.value)">Speichern</button>
       <button class="warn" onclick="zwSpeichern('')">Trennen</button>
     </div>
     <div class="msg" id="zm">Ohne Adresse zaehlt das Board allein, wie bisher.
-      Mit Adresse tritt es dem laufenden Match bei und meldet jeden Punkt.</div>
+      Mit Adresse tritt es dem laufenden Match bei und meldet jeden Punkt.
+      https:// fuer den Zaehlwerk-Server hinter dem Gateway (nur mit Zertifikat
+      der Edge-Root-CA), http:// fuer einen Laptop.</div>
   </div>
 </div>
 
@@ -540,7 +542,9 @@ function senden(){
 // The link to zaehlwerk-api (ADR-0008). Shown under the score only once an
 // address is set, so a board without one looks exactly as it did.
 const zwFehler={no_wifi:'kein WLAN',no_answer:'keine Antwort',unavailable:'503, Server startet?',
-  bad_gateway:'502',gateway_timeout:'504',server_error:'Serverfehler',bad_answer:'unlesbare Antwort',nvs:'NVS-Fehler'};
+  bad_gateway:'502',gateway_timeout:'504',server_error:'Serverfehler',bad_answer:'unlesbare Antwort',nvs:'NVS-Fehler',
+  no_time:'Uhrzeit fehlt, NTP antwortet nicht',tls:'Zertifikat passt nicht zur Edge-Root-CA',
+  redirect:'Server leitet um, https:// eintragen'};
 function zwZeigen(z){
   const an=z.configured, im=z.phase==='joined'||z.phase==='finished';
   // Names come from Schmetterpause through zaehlwerk: text, never markup.
@@ -555,7 +559,8 @@ function zwZeigen(z){
     :z.phase==='finished'?'Match <b>'+z.match_id+'</b> beendet'+wer
     :im?'Im Match <b>'+z.match_id+'</b>'+wer:'Verbindet &hellip;';
   zi.innerHTML=lage
-    +(an?'<br>Adresse <b>'+z.url+'</b> &middot; Quelle <b>'+z.source+'</b>':'')
+    +(an?'<br>Adresse <b>'+z.url+'</b> &middot; Quelle <b>'+z.source+'</b>'
+      +(z.tls?' &middot; TLS, Uhrzeit '+(z.clock?'gesetzt':'<span class="warn">fehlt</span>'):''):'')
     +(an?'<br>Gemeldet <b>'+z.acked+'</b> &middot; wartend <b>'+z.queued+'</b>'
       +(z.dropped?' &middot; <span class="warn">verworfen '+z.dropped+'</span>':'')
       +' &middot; event_id <b>'+z.event_id+'</b>':'')
