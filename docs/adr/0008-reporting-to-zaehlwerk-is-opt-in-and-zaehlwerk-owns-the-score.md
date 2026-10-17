@@ -158,19 +158,21 @@ redirects. So:
 
 **The clock.** The board has no RTC. With an https address it starts SNTP
 (the gateway DHCP handed out first, the Opal router on the box runs one, then
-`pool.ntp.org`) and makes no https request until the clock is set: the event
-waits, nothing is dropped, the page says *Uhrzeit fehlt*, and the log has
-`link`/`unreachable` with `no_time` and later `link`/`clock`. An http address
+`pool.ntp.org`); the page shows whether the clock is set and the log has
+`link`/`clock` once it is. An http address
 starts no SNTP, so a board without https keeps the clock it had. The
 diagnostic log's `t_us` stays boot-relative; the clock is not used for it.
 
 The mbedTLS of the Arduino core this builds against (2.28.4, sdkconfig
 without `MBEDTLS_HAVE_TIME_DATE`) does not check certificate validity dates
-at all, so a board at 1970 would in fact verify. The wait is kept so that a
-core built with date checks does not turn into "not yet valid" at the table;
-`ZW_TLS_WAIT_FOR_TIME=0` switches it off. It also means an expired
-certificate is not refused by the board; trust rests on the chain to the edge
-root and the hostname.
+at all, so a board at 1970 verifies. https therefore does **not** wait for
+the clock (`ZW_TLS_WAIT_FOR_TIME` 0): waiting would only add a way to report
+nothing -- an unreachable NTP server -- without making the board any safer.
+With a core that checks dates, `ZW_TLS_WAIT_FOR_TIME=1` holds https until the
+clock is set (the event waits, nothing is dropped, the page says *Uhrzeit
+fehlt*, the log has `link`/`unreachable` with `no_time`). The other side of
+the same fact: an expired certificate is not refused by the board; trust
+rests on the chain to the edge root and the hostname.
 
 ## Consequences
 

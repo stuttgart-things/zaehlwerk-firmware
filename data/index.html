@@ -560,7 +560,7 @@ function zwZeigen(z){
     :im?'Im Match <b>'+z.match_id+'</b>'+wer:'Verbindet &hellip;';
   zi.innerHTML=lage
     +(an?'<br>Adresse <b>'+z.url+'</b> &middot; Quelle <b>'+z.source+'</b>'
-      +(z.tls?' &middot; TLS, Uhrzeit '+(z.clock?'gesetzt':'<span class="warn">fehlt</span>'):''):'')
+      +(z.tls?' &middot; TLS, Uhrzeit '+(z.clock?'gesetzt':'fehlt'):''):'')
     +(an?'<br>Gemeldet <b>'+z.acked+'</b> &middot; wartend <b>'+z.queued+'</b>'
       +(z.dropped?' &middot; <span class="warn">verworfen '+z.dropped+'</span>':'')
       +' &middot; event_id <b>'+z.event_id+'</b>':'')

@@ -42,14 +42,14 @@
 #define ZW_INGEST_SOURCE ZW_DEVICE_ID
 #endif
 
-// With an https address, wait for SNTP to set the clock before the first
-// request, and retry until then (ADR-0008). Note: the mbedTLS of this Arduino
-// core is built without MBEDTLS_HAVE_TIME_DATE, so it does not check the
-// certificate's validity dates at all, and a board at 1970 would verify. The
-// wait is kept anyway, so that a core built with date checks does not turn
-// into "not yet valid" at the table. 0 tries https without a clock.
+// 1: with an https address, make no request until SNTP has set the clock
+// (ADR-0008). Off by default: the mbedTLS of this Arduino core is built
+// without MBEDTLS_HAVE_TIME_DATE (sdkconfig), so it never checks validity
+// dates and a board at 1970 verifies -- waiting would only add a way for the
+// board to report nothing (no NTP answer) without making it any safer. Turn
+// it on with a core that checks dates; SNTP runs either way.
 #ifndef ZW_TLS_WAIT_FOR_TIME
-#define ZW_TLS_WAIT_FOR_TIME 1
+#define ZW_TLS_WAIT_FOR_TIME 0
 #endif
 
 // Where SNTP asks first: the gateway DHCP handed out (on the table's box the

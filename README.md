@@ -145,9 +145,9 @@ else (`include/tls_trust_anchors.h`, a public certificate copied from
 harvester's `clusters/edge/edge-root-ca.crt`), hostname included. There is no
 insecure fallback: a certificate that does not chain to the edge root means no
 request, and the card says *Zertifikat passt nicht zur Edge-Root-CA*. The board
-first sets its clock over SNTP (the DHCP gateway, then `pool.ntp.org`) and
-sends nothing over https until it has one; the card says *Uhrzeit fehlt* until
-then. To check the embedded root against the source, and the Gateway against
+sets its clock over SNTP (the DHCP gateway, then `pool.ntp.org`), but https
+does not wait for it: this core's mbedTLS never checks validity dates
+(ADR-0008, `ZW_TLS_WAIT_FOR_TIME`). The card shows whether the clock is set. To check the embedded root against the source, and the Gateway against
 it:
 
 ```bash
