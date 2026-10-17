@@ -1,6 +1,9 @@
 # 6. The firmware owns the table half to player mapping
 
-Status: Accepted
+Status: Accepted. While the board is joined to a zaehlwerk match it is
+superseded by
+[ADR-0008](0008-reporting-to-zaehlwerk-is-opt-in-and-zaehlwerk-owns-the-score.md)
+(proposed).
 Date: 2026-09-29
 
 ## Context

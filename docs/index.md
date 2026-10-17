@@ -54,6 +54,7 @@ around it and the reason it was discarded.
 | [0004](adr/0004-diagnostic-log-over-udp-to-a-sink.md) | Diagnostic log over UDP to a sink, beside the API path |
 | [0005](adr/0005-labels-are-append-only-records.md) | Labels are append-only records that point at events |
 | [0006](adr/0006-the-firmware-owns-the-half-to-player-mapping.md) | The firmware owns the table half to player mapping |
+| [0008](adr/0008-reporting-to-zaehlwerk-is-opt-in-and-zaehlwerk-owns-the-score.md) | Reporting to zaehlwerk is opt-in, and once joined zaehlwerk owns the score |
 
 ## Environments
 
