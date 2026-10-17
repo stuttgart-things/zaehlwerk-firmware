@@ -348,8 +348,11 @@ Two things a cluster has to get right, both because the board talks UDP:
   shows "does not answer" while the sink logs its pings is losing the answer
   on the way back.
 
-The viewer (TCP 9001) has no login and only reads; it can sit behind the
-cluster's internal gateway. On the table's box (harvester
+The viewer (TCP 9001) has no login, and with labelling it writes: `/mark` and
+`/label` append label records to the session files (append-only, ADR-0005, so a
+wrong label is superseded, never lost). Put it behind the cluster's internal
+gateway only, where the table's network is the boundary, never on a public
+name. On the table's box (harvester
 `clusters/sthings-edge`) that is `https://log-sink.edge.sthings.lab`, and the
 board sends to `192.168.8.23`.
 
