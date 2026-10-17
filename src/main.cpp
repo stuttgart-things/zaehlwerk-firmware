@@ -45,6 +45,7 @@
 #include "mock.h"
 #include "net.h"
 #include "ota.h"
+#include "reporter.h"
 #include "version.h"
 
 /* ================= configuration ================= */
@@ -432,9 +433,13 @@ void rallyBeenden() {
     // the rally can be counted later against what actually happened.
     logEintragen(folge, "Kein Punkt", String(u.hinweis.c_str()));
     diag::mark(String(u.grund), String(u.hinweis.c_str()), rallyId);
+    // A rally that awarded nothing still goes to zaehlwerk, as delta 0 (#17).
+    // Does nothing without a zaehlwerk address.
+    reporter::rally(' ', folge, 0, rallyId, mock::on());
     return;
   }
   punktGeben(u.gewinner, folge, String(u.hinweis.c_str()), u.grund);
+  reporter::rally(u.gewinner, folge, pointId, rallyId, mock::on());
 }
 
 // Taking back means taking back a point. Nothing else is what somebody reaching
@@ -532,6 +537,54 @@ void namenSetzen(const String &a, const String &b) {
   namenMerken(b);
   diag::match("players", spieler[0], spieler[1],
               seiteZuSpieler[0], seiteZuSpieler[1], satzNummer);
+}
+
+/* ================= zaehlwerk-api ================= */
+// Once the board has joined a match at zaehlwerk, zaehlwerk owns the score
+// (ADR-0008). The board still counts every rally itself, at once, so the page
+// does not wait for the network; this is where zaehlwerk's answer replaces
+// what it counted. lib/report only hands an answer over once it contains every
+// event the board has queued, so nothing the board just counted is taken back
+// here and given back a moment later.
+//
+// Never called without a zaehlwerk address.
+void zwUebernehmen(const report::State &s) {
+  const report::Board b = report::boardFrom(s, aufschlag);
+  const int vorA = punkteA, vorB = punkteB, vorSatz = satzNummer;
+  const char vorAufschlag = aufschlag;
+  const String vorNamen[2] = {spieler[0], spieler[1]};
+  const int vorSeite = seiteZuSpieler[0];
+
+  spieler[0] = s.players[0].c_str();
+  spieler[1] = s.players[1].c_str();
+  seiteZuSpieler[0] = b.sideToPlayer[0];
+  seiteZuSpieler[1] = b.sideToPlayer[1];
+  // The log resolves every later point through the last `match` event, so a
+  // change of names or ends that came from zaehlwerk is said there too.
+  if (vorSeite != seiteZuSpieler[0] || vorNamen[0] != spieler[0] || vorNamen[1] != spieler[1])
+    diag::match(vorSeite != seiteZuSpieler[0] ? "ends_swapped" : "players", spieler[0], spieler[1],
+                seiteZuSpieler[0], seiteZuSpieler[1], b.setNumber);
+  punkteA = b.pointsA;
+  punkteB = b.pointsB;
+  aufschlag = b.serve;
+  ersterAufschlag = b.firstServe;
+  vorbei = b.over;
+  sieger = b.winner;
+  saetze[0] = b.sets[0];
+  saetze[1] = b.sets[1];
+  satzNummer = b.setNumber;
+
+  // Said only when it differs from what the board had counted: an undo on the
+  // phone, a won set, a point the board did not hear, or the first answer
+  // after joining. Agreement is the normal case and says nothing.
+  if (vorA == punkteA && vorB == punkteB && vorAufschlag == aufschlag && vorSatz == satzNummer)
+    return;
+  diag::link("adopted", "", s.matchId.c_str(), 0, 0,
+             String(",\"from\":{\"a\":") + vorA + ",\"b\":" + vorB + ",\"serve\":\"" +
+                 vorAufschlag + "\",\"set_number\":" + vorSatz + "},\"to\":{\"a\":" + punkteA +
+                 ",\"b\":" + punkteB + ",\"serve\":\"" + aufschlag + "\",\"set_number\":" +
+                 satzNummer + ",\"over\":" + (vorbei ? "true" : "false") + "}");
+  logEintragen("", String("Stand vom Zaehlwerk: ") + punkteA + ":" + punkteB, "");
 }
 
 /* ================= web server ================= */
@@ -739,6 +792,10 @@ void setup() {
   net::begin({ ZW_HOSTNAME, AP_PREFIX, AP_PASS,
                ZW_STA_SSID, ZW_STA_PASS, ZW_STA_TIMEOUT_MS });
 
+  // The link to zaehlwerk-api, on the core that does not sample. Without an
+  // address it starts nothing (ADR-0008).
+  reporter::begin();
+
   server.on("/", []{
     File f = LittleFS.open("/index.html", "r");
     if (!f || f.isDirectory()) {
@@ -757,6 +814,22 @@ void setup() {
   });
   server.on("/state", handleState);
   server.on("/version", handleVersion);
+  // The link to zaehlwerk-api (#66): its state, and the address set or cleared
+  // on the page. POST, like /wifi. The address is no secret and is shown back,
+  // because seeing which zaehlwerk the board talks to is what makes a wrong one
+  // diagnosable.
+  server.on("/zaehlwerk", HTTP_GET, []{
+    server.send(200, "application/json", reporter::statusJson(mock::on()));
+  });
+  server.on("/zaehlwerk/url", HTTP_POST, []{
+    if (!server.hasArg("url")) {
+      server.send(400, "text/plain", "url fehlt\n");
+      return;
+    }
+    String msg;
+    const bool ok = reporter::setUrl(server.arg("url"), msg);
+    server.send(ok ? 200 : 400, "text/plain", msg + "\n");
+  });
   server.on("/net", handleNet);
   server.on("/wifi", HTTP_POST, handleWifi);
   server.on("/punkt", []{
@@ -765,11 +838,17 @@ void setup() {
     char s = server.arg("s") == "B" ? 'B' : 'A';
     punktGeben(s, "", "Manuell vergeben.", "manual",
                server.arg("tag"), server.arg("note"));
+    reporter::manualPoint(s, pointId, mock::on());
     server.send(200, "text/plain", "ok");
   });
   server.on("/zurueck", []{
     pausieren();
+    const uint32_t vorher = pointId;
     const char *was = zurueck(server.arg("tag"), server.arg("note"));
+    // Joined, one press takes back one point at zaehlwerk, whatever the board
+    // had left to pop locally: the score there is the one that counts. An
+    // undo event with its own id, never POST /matches/{id}/undo (#67).
+    reporter::undo(pointId != vorher ? pointId : 0, mock::on());
     server.send(200, "application/json",
                 String("{\"undone\":\"") + was + "\",\"a\":" + punkteA +
                 ",\"b\":" + punkteB + "}");
@@ -969,6 +1048,7 @@ void loop() {
   simulationTreiben();
   mock::tick();
   diag::tick();
+  reporter::tick(zwUebernehmen, mock::on());
   ota::handle();
   ota::tick(startWarSauber());
 
