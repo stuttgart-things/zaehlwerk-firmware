@@ -111,6 +111,25 @@ A board with no filesystem is not bricked. It answers `/` with **HTTP 503** and 
 recovery page that can upload either image itself, so the way back does not need
 a cable.
 
+## Buttons
+
+Every button goes through one path (`lib/buttons`): a press arrives as a half,
+a gesture and where it came from, and the scoring code never learns whether it
+was the board's page, a radio button ([#58](../../issues/58)) or a wire.
+
+| Gesture | Does |
+| --- | --- |
+| short | a point for that half; after the game is won, starts the next |
+| long (1 s) | takes back the last point, at once |
+| very long (3 s) | a new game — refused while the board is joined to a match at zaehlwerk, whose next game starts there |
+
+The card **Taster** on the board's page has a virtual button per half: hold it
+like the real one, and it turns orange at *long* and darker at *very long*. The
+thresholds are under **Einstellungen** and stay over a restart. *Punkt*,
+*Letzten zurück* and *Neues Spiel* further down are the same presses with a
+fixed gesture. Every press is a `button` event in the log
+([schema](docs/event-schema.md)).
+
 ## Reporting to zaehlwerk-api
 
 **Off unless the board is given an address.** Without one the board counts on
@@ -256,6 +275,117 @@ Sender and receiver must agree on it exactly; the struct is explicitly packed
 because `button` builds for RISC-V and `hub` for Xtensa. A mismatch presents as
 radio that silently does nothing.
 
+## Check-in by fob
+
+A key fob held to a reader at the hub, then a press on your own button, checks
+you in at that half ([#63](../../issues/63),
+[ADR-0007](docs/adr/0007-a-fob-turns-the-next-press-into-a-check-in.md)). Two
+halves checked in and zaehlwerk starts the match
+([zaehlwerk ADR-0010](https://github.com/stuttgart-things/zaehlwerk/blob/main/docs/adr/0010-check-in-per-table-half.md)).
+
+1. A fob is read. The green LED blinks: press your button, within five seconds.
+2. The next press of a paired button names the half. That press is a check-in,
+   not a point.
+3. The board sends `POST /ingest/checkin` once and shows the answer.
+4. No press in time: the fob is forgotten, two short red blinks.
+
+While a rally is open, or a game stands between its first point and its end, a
+fob is refused at once and the press after it stays a point.
+
+**Only with zaehlwerk's token.** zaehlwerk takes a check-in only with its
+`CHECKIN_TOKEN` as a bearer ([#65](../../issues/65), zaehlwerk#113), so the
+board sends `Authorization: Bearer <token>` on every check-in. Points carry no
+token. Without one on the board no check-in is sent at all: startup and the page
+say so, and a fob gets "rejected".
+
+**The UID is never logged or stored.** Not on serial, not in the diagnostic log,
+not in NVS. It lives in RAM for the window and the one request. The log says
+`checkin`, the half and the outcome. Our own fobs only: MIFARE Classic 1K or NTAG.
+
+### Wiring
+
+An RC522 on VSPI, beside the piezo inputs on 34 and 35, which it does not touch:
+
+| RC522 | ESP32 | |
+| --- | --- | --- |
+| SDA | GPIO 5 | chip select |
+| SCK | GPIO 18 | |
+| MOSI | GPIO 23 | |
+| MISO | GPIO 19 | |
+| RST | GPIO 22 | |
+| IRQ | — | not connected, the reader is polled |
+| 3.3V | 3V3 | **not 5 V** |
+| GND | GND | |
+| green LED | GPIO 25 | through a resistor (220–330 Ω) to GND |
+| red LED | GPIO 26 | the same |
+
+Every pin is a build flag in `include/config.h`. The range is one to three
+centimetres, so the reader goes at the table edge by the net, on a short cable,
+not under the top.
+
+### What the LED says
+
+| | Green | Red |
+| --- | --- | --- |
+| Press your button | blinks | |
+| Sending | on | on |
+| Checked in (`claimed`, `unchanged`, `replaced`, `moved`, `started`) | on, 2 s | |
+| Unknown fob (404) | | on, 2 s |
+| Refused: a match is running (409), play is going on here, a `duplicate`, a wrong token (401/403) or none on the board | | blinks, 2 s |
+| Unavailable: zaehlwerk or Schmetterpause not answering (503, 5xx, no wifi), check-in off | | blinks fast, 2 s |
+| Nobody pressed in time | | two short blinks |
+
+### Configuration
+
+| Build flag | Default | |
+| --- | --- | --- |
+| `ZW_API_URL` | empty | zaehlwerk-api, the same address the points go to. Seeds the board only while NVS holds none; set on the page in the card *Zaehlwerk-Server* (#66). Empty: check-in is off and a fob gets "unavailable" |
+| `ZW_CHECKIN_TOKEN` | empty | zaehlwerk's `CHECKIN_TOKEN`. Seeds the board only while NVS holds none; see below |
+| `ZW_INGEST_SOURCE` | `ZW_DEVICE_ID` | the `source` of the ingest contract. Points and check-ins count on the same `event_id`, kept in NVS |
+| `ZW_CHECKIN_WINDOW_MS` | `5000` | how long a fob waits for a press |
+| `ZW_FOB_CORE` | the core that does not sample | never `ZW_SENSOR_CORE`; the build fails if it is |
+
+### The token
+
+The token is kept like the wifi credentials, not like the OTA password: in NVS,
+set on the board's page. A released image is built in CI without `secrets.ini`
+and carries none, so this is how it gets one.
+
+- **On the page:** card "Check-in per Fob", paste the token, "Token speichern".
+  It applies at once, no restart. "Token loeschen" clears it.
+- **With curl**, from a variable so it stays out of the shell history:
+
+  ```bash
+  curl -4 -s -X POST --data-urlencode "token=$CHECKIN_TOKEN" http://zaehlwerk.local/checkin/token
+  curl -4 -s -X POST --data-urlencode "token=" http://zaehlwerk.local/checkin/token   # clear
+  ```
+
+- **From `secrets.ini`:** `-DZW_CHECKIN_TOKEN='"…"'` seeds a board whose NVS has
+  no token key. Once a token is set or cleared on the page, that wins; a cleared
+  one stays cleared until NVS is erased.
+
+**The token is never shown back and never logged.** The page and `/checkin` say
+`"token": true` or `false`, never the value, and the field is empty after
+saving. Serial and the diagnostic log say whether one is set and where it came
+from, never what it is. A token with a space, a line break or a character
+outside printable ASCII is refused rather than stored; at most 256 characters.
+
+The board's page has no login, as for the wifi credentials: anybody on the
+network can set or clear the token, but nobody can read it back.
+
+### Until the buttons exist
+
+The press is meant to come from a paired ESP-NOW button (#58, #59), and neither
+exists yet. Until then the board's page stands in for one:
+
+```bash
+curl -4 -s 'http://zaehlwerk.local/checkin'           # on, api, token set, reader, LED, last outcome
+curl -4 -s 'http://zaehlwerk.local/checkin?press=A'   # a press at half A
+```
+
+`?press=` only ever checks in. With no fob waiting it answers `"taken": false`
+and is not a point.
+
 ## Two things that look like broken hardware
 
 **Channel mismatch.** Wifi and ESP-NOW share the radio, so peers must sit on the
@@ -277,6 +407,7 @@ discards all but the first as duplicates — see
 | [0004](docs/adr/0004-diagnostic-log-over-udp-to-a-sink.md) | Diagnostic log over UDP to a sink, beside the API path |
 | [0005](docs/adr/0005-labels-are-append-only-records.md) | Labels are append-only records that point at events |
 | [0006](docs/adr/0006-the-firmware-owns-the-half-to-player-mapping.md) | The firmware owns the table half to player mapping |
+| [0007](docs/adr/0007-a-fob-turns-the-next-press-into-a-check-in.md) | A fob turns the next press into a check-in |
 | [0008](docs/adr/0008-reporting-to-zaehlwerk-is-opt-in-and-zaehlwerk-owns-the-score.md) | Reporting to zaehlwerk is opt-in, and once joined zaehlwerk owns the score |
 
 What the events look like: [docs/event-schema.md](docs/event-schema.md).

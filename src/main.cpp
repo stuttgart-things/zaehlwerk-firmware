@@ -39,9 +39,12 @@
 
 #include <string>
 
+#include "buttons.h"
 #include "config.h"
 #include "diag.h"
+#include "fob.h"
 #include "game.h"
+#include "ingest.h"
 #include "mock.h"
 #include "net.h"
 #include "ota.h"
@@ -68,6 +71,12 @@ volatile int logSchwelleB = 120;
 // It classifies today, it does not yet decide — see diag::Hit::counted.
 volatile int clearRatioPromille = 1800;
 
+// Where a press on a button becomes long (take back) and very long (new game).
+// The page's virtual buttons are timed with these, and the radio buttons (#58)
+// will be told them. See lib/buttons.
+volatile int tasteLangMs     = 1000;
+volatile int tasteSehrLangMs = 3000;
+
 const int SPERRE_MS  = 60;          // Nachklingen
 const int FENSTER_MS = 30;          // Vergleichsfenster zwischen den Kanälen
 
@@ -90,8 +99,8 @@ QueueHandle_t queue;
 // moves to core 1, where nothing else runs. Core 1's idle task is not watched by
 // the watchdog in this build, so a tight loop there is survivable; on core 0 it
 // would starve wifi and lwIP.
-// ZW_SENSOR_CORE is in include/config.h, because the link to zaehlwerk-api has
-// to know which core to stay off.
+// ZW_SENSOR_CORE is in include/config.h, because the link to zaehlwerk-api and
+// the fob reader have to know which core to stay off.
 // How many readings between one tick of sleep. A bare taskYIELD() here starved
 // core 1's idle task: the image booted, confirmed itself valid after the ten
 // second probation and then crash-looped every thirty-five seconds — past the
@@ -381,6 +390,8 @@ void cfgLaden() {
   lies("log_a",  logSchwelleA);
   lies("log_b",  logSchwelleB);
   lies("ratio",  clearRatioPromille);
+  lies("btn_l",  tasteLangMs);
+  lies("btn_v",  tasteSehrLangMs);
   p.end();
 }
 
@@ -477,6 +488,14 @@ const char *zurueck(const String &marke = "", const String &kommentar = "") {
   return ballwechselVerworfen ? "rally+point" : "point";
 }
 
+// Whether play is going on, as far as this board can tell: a rally open, or a
+// game between its first point and its last. A fob is then refused, so the next
+// press stays a point instead of being taken as a check-in (ADR-0007). Whether
+// a match is running at zaehlwerk is zaehlwerk's to say, and it does, with a
+// 409 — this only keeps the board from eating a point while it asks.
+bool spielLaeuft() {
+  return rally.length() > 0 || (!vorbei && (punkteA > 0 || punkteB > 0));
+}
 void neuesSpiel() {
   punkteA = punkteB = 0; vorbei = false; sieger = ' ';
   aufschlag = ersterAufschlag; rally = ""; logAnzahl = 0; verlaufN = 0;
@@ -484,6 +503,68 @@ void neuesSpiel() {
   diag::match("start", spieler[0], spieler[1],
               seiteZuSpieler[0], seiteZuSpieler[1], satzNummer);
 }
+
+buttons::Timing tastenZeiten() {
+  buttons::Timing t;
+  t.longMs = (uint32_t)tasteLangMs;
+  t.veryLongMs = (uint32_t)tasteSehrLangMs;
+  return t;
+}
+
+struct TastenErgebnis {
+  buttons::Decision d;
+  const char *undone;  // what zurueck() took back, for the page; "" otherwise
+};
+
+// The one consumer of every button press (#56). The page's buttons, the radio
+// buttons and anything wired later all end here, and nothing below this line
+// knows which of them it was — the log does, from the event.
+//
+// tag and note come only from the page's correction card; a button in the hand
+// has neither.
+TastenErgebnis taste(const buttons::Event &e, const String &marke = "",
+                     const String &kommentar = "") {
+  const buttons::Board brett{vorbei, reporter::linked(mock::on())};
+  const buttons::Decision d = buttons::decide(e, brett);
+  const char *undone = "";
+  uint32_t bezug = 0;
+
+  switch (d.action) {
+    case buttons::Action::Point:
+      pausieren();
+      sichern(); rally = "";
+      punktGeben(e.side, "", "Manuell vergeben.", "manual", marke, kommentar);
+      reporter::manualPoint(e.side, pointId, mock::on());
+      bezug = pointId;
+      break;
+    case buttons::Action::Undo: {
+      pausieren();
+      const uint32_t vorher = pointId;
+      undone = zurueck(marke, kommentar);
+      // Joined, one press takes back one point at zaehlwerk, whatever the board
+      // had left to pop locally: the score there is the one that counts. An
+      // undo event with its own id, never POST /matches/{id}/undo (#67).
+      reporter::undo(pointId != vorher ? pointId : 0, mock::on());
+      if (pointId != vorher) bezug = pointId;
+      break;
+    }
+    case buttons::Action::StartGame:
+    case buttons::Action::NewGame:
+      neuesSpiel();
+      break;
+    case buttons::Action::Refused:
+      break;
+  }
+
+  diag::button(buttons::sourceName(e.source), buttons::gestureName(e.gesture), e.side,
+               e.heldMs, buttons::actionName(d.action), d.reason, bezug, rallyId);
+  return {d, undone};
+}
+
+buttons::Event virtuell(char seite, buttons::Gesture g, uint32_t ms = 0) {
+  return {seite, g, buttons::Source::Virtual, ms};
+}
+
 
 // The one manual step this design cannot remove: a change of ends nobody
 // presses silently swaps every point after it. So it is a control on the main
@@ -589,6 +670,17 @@ void zwUebernehmen(const report::State &s) {
 
 /* ================= web server ================= */
 WebServer server(80);
+
+// Every virtual press answers the same way, so the page can say what happened —
+// a refused press that answers "ok" reads as a button that is broken.
+void tasteAntworten(const TastenErgebnis &r) {
+  String j = String("{\"action\":\"") + buttons::actionName(r.d.action) + "\"";
+  if (*r.d.reason) j += String(",\"reason\":\"") + r.d.reason + "\"";
+  if (*r.undone) j += String(",\"undone\":\"") + r.undone + "\"";
+  j += ",\"a\":" + String(punkteA) + ",\"b\":" + String(punkteB) + "}";
+  server.send(200, "application/json", j);
+}
+
 bool webserverLaeuft = false;
 
 // The page lives in data/index.html and is uploaded to LittleFS separately from
@@ -658,6 +750,8 @@ void handleState() {
   j += ",\"la\":" + String(logSchwelleA) + ",\"lb\":" + String(logSchwelleB);
   j += ",\"cr\":" + String(clearRatioPromille);
   j += ",\"to\":" + String(rallyTimeout);
+  j += ",\"bl\":" + String(tasteLangMs) + ",\"bv\":" + String(tasteSehrLangMs);
+  j += ",\"linked\":" + String(reporter::linked(mock::on()) ? "true" : "false");
   j += ",\"na\":\"" + jsonEscape(nameFuer('A')) + "\"";
   j += ",\"nb\":\"" + jsonEscape(nameFuer('B')) + "\"";
   j += ",\"named\":" + String(habenNamen() ? "true" : "false");
@@ -721,6 +815,8 @@ String parameterJson() {
   j += ",\"rally_timeout_ms\":" + String(rallyTimeout);
   j += ",\"pre_trigger_samples\":" + String((int)diag::PRE_SAMPLES);
   j += ",\"capture_samples\":" + String((int)diag::CAPTURE_SAMPLES);
+  j += ",\"button_long_ms\":" + String(tasteLangMs);
+  j += ",\"button_very_long_ms\":" + String(tasteSehrLangMs);
   j += "}";
   return j;
 }
@@ -795,6 +891,10 @@ void setup() {
   // The link to zaehlwerk-api, on the core that does not sample. Without an
   // address it starts nothing (ADR-0008).
   reporter::begin();
+  // The fob reader, on the core that does not sample (ADR-0003, ADR-0007).
+  // After the reporter: that is where ingest::begin() reads the address and
+  // the counter both of them share.
+  fob::begin();
 
   server.on("/", []{
     File f = LittleFS.open("/index.html", "r");
@@ -830,30 +930,66 @@ void setup() {
     const bool ok = reporter::setUrl(server.arg("url"), msg);
     server.send(ok ? 200 : 400, "text/plain", msg + "\n");
   });
+  // Check-in by fob. ?press=A or ?press=B stands in for a paired button until the
+  // ESP-NOW path of #58 exists, and does only that: with no fob waiting it is not
+  // a point, just a press that came to nothing.
+  server.on("/checkin", []{
+    if (server.hasArg("press")) {
+      const String s = server.arg("press");
+      const bool taken = (s == "A" || s == "B") && fob::press(s[0]);
+      server.send(200, "application/json",
+                  String("{\"taken\":") + (taken ? "true" : "false") +
+                  ",\"checkin\":" + fob::stateJson() + "}");
+      return;
+    }
+    server.send(200, "application/json", fob::stateJson());
+  });
+  // zaehlwerk's CHECKIN_TOKEN (#65). POST, like /wifi: a token does not belong
+  // in a URL. `token=` empty clears it. The answer says whether one is set and
+  // never echoes it, and neither does the log line.
+  server.on("/checkin/token", HTTP_POST, []{
+    if (!server.hasArg("token")) {
+      server.send(400, "text/plain", "token fehlt\n");
+      return;
+    }
+    String t = server.arg("token");
+    const ingest::TokenChange c = ingest::setCheckinToken(t);
+    if (t.length()) memset(&t[0], 0, t.length());
+    if (c == ingest::TokenChange::Refused) {
+      server.send(400, "text/plain",
+                  "Nicht gespeichert: 1 bis 256 Zeichen, ohne Leerzeichen und Umlaute.\n");
+      return;
+    }
+    Serial.println(c == ingest::TokenChange::Set ? "[checkin] token set on the page"
+                                                 : "[checkin] token cleared on the page");
+    server.send(200, "application/json", fob::stateJson());
+  });
   server.on("/net", handleNet);
   server.on("/wifi", HTTP_POST, handleWifi);
+  // The page's buttons are virtual buttons (#56): each is a press with a fixed
+  // gesture through the same consumer as a button in the hand, so nothing that
+  // already calls these routes breaks and nothing behind them is different.
   server.on("/punkt", []{
-    pausieren();
-    sichern(); rally = "";
-    char s = server.arg("s") == "B" ? 'B' : 'A';
-    punktGeben(s, "", "Manuell vergeben.", "manual",
-               server.arg("tag"), server.arg("note"));
-    reporter::manualPoint(s, pointId, mock::on());
-    server.send(200, "text/plain", "ok");
+    const char s = server.arg("s") == "B" ? 'B' : 'A';
+    tasteAntworten(taste(virtuell(s, buttons::Gesture::Short),
+                         server.arg("tag"), server.arg("note")));
   });
   server.on("/zurueck", []{
-    pausieren();
-    const uint32_t vorher = pointId;
-    const char *was = zurueck(server.arg("tag"), server.arg("note"));
-    // Joined, one press takes back one point at zaehlwerk, whatever the board
-    // had left to pop locally: the score there is the one that counts. An
-    // undo event with its own id, never POST /matches/{id}/undo (#67).
-    reporter::undo(pointId != vorher ? pointId : 0, mock::on());
-    server.send(200, "application/json",
-                String("{\"undone\":\"") + was + "\",\"a\":" + punkteA +
-                ",\"b\":" + punkteB + "}");
+    tasteAntworten(taste(virtuell(' ', buttons::Gesture::Long),
+                         server.arg("tag"), server.arg("note")));
   });
-  server.on("/neu",     []{ neuesSpiel(); server.send(200, "text/plain", "ok"); });
+  server.on("/neu", []{
+    tasteAntworten(taste(virtuell(' ', buttons::Gesture::VeryLong)));
+  });
+  // A held virtual button: the page measures how long it was held and the
+  // board decides what that was, with the same thresholds a button would use.
+  server.on("/taste", []{
+    const String s = server.arg("s");
+    const char seite = s == "A" ? 'A' : s == "B" ? 'B' : ' ';
+    const uint32_t ms = (uint32_t)server.arg("ms").toInt();
+    tasteAntworten(taste(virtuell(seite, buttons::classify(ms, tastenZeiten()), ms),
+                         server.arg("tag"), server.arg("note")));
+  });
   server.on("/cfg", []{
     auto setzen = [](const char *arg, const char *name, const char *key,
                      volatile int &ziel) {
@@ -870,6 +1006,19 @@ void setup() {
     setzen("la", "log_threshold_a",  "log_a", logSchwelleA);
     setzen("lb", "log_threshold_b",  "log_b", logSchwelleB);
     setzen("cr", "clear_ratio",      "ratio", clearRatioPromille);
+    // The two press thresholds only make sense together, so they are checked
+    // as a pair and a pair nobody could press is not stored.
+    if (server.hasArg("bl") || server.hasArg("bv")) {
+      buttons::Timing t = tastenZeiten();
+      if (server.hasArg("bl")) t.longMs = (uint32_t)server.arg("bl").toInt();
+      if (server.hasArg("bv")) t.veryLongMs = (uint32_t)server.arg("bv").toInt();
+      if (!buttons::valid(t)) {
+        server.send(400, "text/plain", "long from 200 ms, very long at least 500 ms after it and at most 10 s\n");
+        return;
+      }
+      setzen("bl", "button_long_ms",      "btn_l", tasteLangMs);
+      setzen("bv", "button_very_long_ms", "btn_v", tasteSehrLangMs);
+    }
     server.send(200, "text/plain", "ok");
   });
 
@@ -1049,6 +1198,8 @@ void loop() {
   mock::tick();
   diag::tick();
   reporter::tick(zwUebernehmen, mock::on());
+  fob::setBusy(spielLaeuft());
+  fob::tick();
   ota::handle();
   ota::tick(startWarSauber());
 

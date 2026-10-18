@@ -17,10 +17,62 @@
 #endif
 
 // Which core samples. The sketch's arrangement is core 0; ADR-0003 moves it to
-// core 1, and #33 is where that is being tried. Whatever it is, the link to
-// zaehlwerk-api below stays off it.
+// core 1, and #33 is where that is being tried. Whatever it is, the fob reader
+// and the link to zaehlwerk-api below stay off it.
 #ifndef ZW_SENSOR_CORE
 #define ZW_SENSOR_CORE 0
+#endif
+
+// --- the fob reader at the hub (#63, ADR-0007) ----------------------------
+// An RC522 on VSPI. None of these touch the piezo inputs: 34 and 35 are
+// input-only pins on ADC1, and the reader's lines are all elsewhere.
+//
+//   RC522   ESP32
+//   SDA  -> GPIO 5   (chip select; a strapping pin, but idle high is its
+//                     default, so the reader does not disturb the boot)
+//   SCK  -> GPIO 18
+//   MOSI -> GPIO 23
+//   MISO -> GPIO 19
+//   RST  -> GPIO 22
+//   IRQ     not connected — the reader is polled
+//   3.3V -> 3V3      never 5 V: the RC522 is a 3.3 V part
+//   GND  -> GND
+#ifndef ZW_PIN_RC522_SCK
+#define ZW_PIN_RC522_SCK 18
+#endif
+#ifndef ZW_PIN_RC522_MISO
+#define ZW_PIN_RC522_MISO 19
+#endif
+#ifndef ZW_PIN_RC522_MOSI
+#define ZW_PIN_RC522_MOSI 23
+#endif
+#ifndef ZW_PIN_RC522_SS
+#define ZW_PIN_RC522_SS 5
+#endif
+#ifndef ZW_PIN_RC522_RST
+#define ZW_PIN_RC522_RST 22
+#endif
+
+// The LEDs at the reader, each through a resistor to GND. ADC2 pins, which is
+// fine for an output: only analogRead on ADC2 is lost to wifi. -1 leaves one
+// out; with only one fitted the patterns still differ, but red and green are
+// what make an unknown fob readable at a glance.
+#ifndef ZW_PIN_LED_GREEN
+#define ZW_PIN_LED_GREEN 25
+#endif
+#ifndef ZW_PIN_LED_RED
+#define ZW_PIN_LED_RED 26
+#endif
+
+// How long a fob waits for a press before it is forgotten.
+#ifndef ZW_CHECKIN_WINDOW_MS
+#define ZW_CHECKIN_WINDOW_MS 5000
+#endif
+
+// The reader is polled on the core that does not sample (ADR-0003). Not a
+// fixed number on purpose: today that is core 1, once #33 lands it is core 0.
+#ifndef ZW_FOB_CORE
+#define ZW_FOB_CORE (ZW_SENSOR_CORE == 0 ? 1 : 0)
 #endif
 
 // --- zaehlwerk-api (#17, #41, #66, ADR-0008) --------------------------------
@@ -29,11 +81,20 @@
 // only seeds the board while NVS holds no address: once one is set or cleared
 // on the board's page, that wins (#66). Empty, as in a released image, means
 // the board reports nowhere and counts on its own, exactly as without this
-// feature. An IP or a name the router's DNS knows; a .local name is not
+// feature, and a fob is answered "unavailable" at once instead of waiting for
+// a press. An IP or a name the router's DNS knows; a .local name is not
 // resolved by the HTTP client. https is verified against the edge root only
 // (include/tls_trust_anchors.h).
 #ifndef ZW_API_URL
 #define ZW_API_URL ""
+#endif
+
+// zaehlwerk's CHECKIN_TOKEN, sent as a bearer on every check-in (#65). This
+// only seeds the board while NVS holds none: once a token is set or cleared on
+// the board's page, that wins. Empty here, so a released image carries none and
+// is given one through the page. Without a token no check-in is sent.
+#ifndef ZW_CHECKIN_TOKEN
+#define ZW_CHECKIN_TOKEN ""
 #endif
 
 // The `source` of the ingest contract (zaehlwerk ADR-0002). The counter behind

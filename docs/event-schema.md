@@ -76,6 +76,7 @@ switch between mock and real play, and before an OTA update.
     "deadtime_us": 60000,
     "clear_ratio": 1.8,
     "rally_timeout_ms": 1500,
+    "button_long_ms": 1000, "button_very_long_ms": 3000,
     "pre_trigger_us": 20000,
     "sample_rate_hz": 20000,
     "profile": "tisch-buero"
@@ -226,6 +227,50 @@ moment ([ADR-0006](adr/0006-the-firmware-owns-the-half-to-player-mapping.md)).
 All three are stored, so a mapping that turns out to be wrong is correctable in
 the export instead of invalidating the session.
 
+## `button` — a button was pressed
+
+Every press, from any button, before anything else is known about it: which
+button, which gesture, and what the board did with it
+([#56](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/56)).
+
+```json
+{ "type": "button", "source": "virtual", "gesture": "long", "side": null,
+  "held_ms": 1304, "action": "undo",
+  "point_id": "8f3a2c11-p24", "rally_id": "8f3a2c11-r14" }
+```
+
+| Field | |
+| --- | --- |
+| `source` | `virtual` (the board's page), `espnow` (a radio button, [#58](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/58)), `wired` |
+| `gesture` | `short`, `long` or `very_long` — decided by the button, because only the button sees both ends of a press |
+| `side` | `A` or `B`, the half the button belongs to; `null` for the page's *take back* and *new game*, which belong to no half |
+| `held_ms` | as measured; `0` when the button sent only the gesture |
+| `action` | `point`, `undo`, `new_game`, `start_game` (a short press after the game was won) or `refused` |
+| `reason` | only on `refused`: `no_side` (a point without a half) or `next_game_on_zaehlwerk` (see below) |
+| `point_id` | the point it awarded, or the `undo` point it caused; absent when it did neither |
+
+What a gesture does:
+
+| Gesture | Does |
+| --- | --- |
+| `short` | a point for that half — or, after the game is won, starts the next one |
+| `long` (1 s) | takes back the last point, at once, also the match point |
+| `very_long` (3 s) | a new game |
+
+A new game is one very long press, not both halves held long: pairing two
+long presses would have held every undo back by the pairing window. Both
+thresholds are `params` (`button_long_ms`, `button_very_long_ms`) and are set
+on the board's page.
+
+**While the board is joined to a match at zaehlwerk-api, no button starts a
+game.** The score is zaehlwerk's then, and zaehlwerk has no door for a table
+to start one — ending the match is the nearest, and that cannot be undone. The
+press is logged as `refused` with `next_game_on_zaehlwerk`, and the page says
+the next game starts there.
+
+The score change itself is still the `point` event that follows, with `reason`
+`manual` or `undo` as before; `button` says who asked for it.
+
 ## `match` — players, ends, sets
 
 ```json
@@ -330,6 +375,46 @@ Also only with a zaehlwerk address.
 
 `adopted` is what explains a score that changed with no `point` before it:
 an undo on the phone, a set won at zaehlwerk, a point the board did not hear.
+
+## `checkin` — a fob, a press, and what zaehlwerk said
+
+One event per step of a check-in by fob
+([ADR-0007](adr/0007-a-fob-turns-the-next-press-into-a-check-in.md)).
+**There is no field for the card.** The UID never reaches this log, in any
+spelling; a fob that does not check in is debugged by its outcome.
+
+```json
+{ "type": "checkin", "outcome": "claimed", "side": "A", "half": "left",
+  "source": "piezo-1", "event_id": 43, "http": 200, "attempts": 1 }
+```
+
+| `outcome` | |
+| --- | --- |
+| `waiting` | a fob was read, the window is open. No half yet |
+| `busy` | a fob during play, refused on the board; nothing was sent |
+| `off` | a fob with no zaehlwerk address on the board; nothing was sent |
+| `no_token` | a fob with no check-in token on the board; nothing was sent (#65) |
+| `ignored` | a fob while a request was out |
+| `expired` | nobody pressed within the window; the UID is gone |
+| `claimed` `unchanged` `replaced` `moved` `started` | zaehlwerk took it (200) |
+| `duplicate` | zaehlwerk had a higher `event_id` from this source; nothing changed |
+| `unauthorized` | zaehlwerk refused the token, or got none (401 or 403). Says nothing about the fob |
+| `unknown` | the fob belongs to nobody (404) |
+| `refused` | a match is running at zaehlwerk (409) |
+| `unavailable` | zaehlwerk could not ask Schmetterpause, or check-in is off there (503) |
+| `failed` | 500 |
+| `bad_request` | 400: a request this firmware built and zaehlwerk would not read |
+| `http_error` | any other status |
+| `no_wifi` | the board is not on a network; nothing was sent |
+| `no_answer` | on a network, but nobody answered, after `attempts` tries |
+| `ok` | 200 with an outcome this firmware does not know |
+
+Neither field nor outcome ever carries the check-in token; the log says
+whether one is set (a `note`), never what it is.
+
+`side` and `half` are there once a press named one: `side` the half as every
+other event writes it, `half` the token zaehlwerk was sent. `source`,
+`event_id`, `http` and `attempts` are there once a request was made.
 
 ## `sync` — a marker for lining up a phone video
 
@@ -453,3 +538,5 @@ The ingest `event_id` is the one that is not like the others: it is a plain
 counter the API deduplicates on, it is per source rather than per session, and
 it has to survive a restart or every reboot replays point one
 ([zaehlwerk ADR-0002](https://github.com/stuttgart-things/zaehlwerk/blob/main/docs/adr/0002-idempotent-ingest-contract.md)).
+Check-in by fob is the first thing that sends one. The counter is in NVS
+(namespace `ingest`, key `event_id`) and is written before each request goes.
