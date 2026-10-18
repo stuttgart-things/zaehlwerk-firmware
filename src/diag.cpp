@@ -55,6 +55,7 @@ uint32_t zuletztGehoert_ = 0;
 uint32_t zuletztGefragt_ = 0;
 
 char sessionId_[9] = "00000000";
+String matchId_;
 uint32_t seq_ = 0;
 uint32_t dropped_ = 0;
 String host_;
@@ -384,8 +385,11 @@ void match(const char *phase, const String &nameA, const String &nameB,
   f += String(",\"sides\":{\"A\":\"") + (sideAPlayer == 0 ? "a" : "b") +
        "\",\"B\":\"" + (sideBPlayer == 0 ? "a" : "b") + "\"}";
   f += ",\"set_number\":" + String(setNumber);
+  if (matchId_.length()) f += ",\"match_id\":\"" + esc(matchId_) + "\"";
   emitNow("match", f);
 }
+
+void setMatchId(const char *matchId) { matchId_ = matchId ? matchId : ""; }
 
 void ingest(const char *status, const char *reason, const char *action, uint32_t eventId,
             char half, int delta, const char *matchId, const char *source, int http,

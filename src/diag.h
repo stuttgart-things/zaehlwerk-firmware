@@ -102,11 +102,15 @@ void point(uint32_t pointId, uint32_t rallyId, const String &reason,
            const String &tag, const String &note,
            const String &player, const String &playerName);
 
-// Players, ends and sets. phase is "start", "players", "ends_swapped" or "end".
-// `sides` is the mapping in force from this event onwards, which is what makes
-// every later point resolvable.
+// Players, ends and sets. phase is "start", "players", "ends_swapped" or "end",
+// and "join" or "leave" for a match at zaehlwerk (#42). `sides` is the mapping
+// in force from this event onwards, which is what makes every later point
+// resolvable. Carries the zaehlwerk match id while one is set.
 void match(const char *phase, const String &nameA, const String &nameB,
            int sideAPlayer, int sideBPlayer, int setNumber);
+// The zaehlwerk match the board's points go to from here, or "" for none. Only
+// the reporter sets it, around its "join" and "leave".
+void setMatchId(const char *matchId);
 // The delivery record of one event to zaehlwerk-api (#17, #67, #69): queued,
 // acked, sent again, or dropped and why. `action` is "point" or "undo";
 // pointId and rallyId tie it to the board's own point and rally, 0 for none.

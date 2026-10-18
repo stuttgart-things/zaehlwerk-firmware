@@ -368,3 +368,55 @@ func TestTheZaehlwerkLinkRecordsAreStoredLikeAnyOtherEvent(t *testing.T) {
 		t.Errorf("expected the one point to make one game, got %d", len(games))
 	}
 }
+
+// A board in a zaehlwerk match names it on its match events (#42). The points
+// after a join go to that match, in the summary and in the game files; after
+// the leave they go to none, though the leave still names what it left.
+func TestPointsCarryTheZaehlwerkMatchTheyWereScoredIn(t *testing.T) {
+	s, dir := newTestSink(t)
+	now := time.Now()
+	for i, ev := range []string{
+		`"type":"point","point_id":"aa-p1","reason":"last_bounce","side":"A","to":{"a":1,"b":0,"serve":"A","over":false}`,
+		`"type":"match","phase":"join","players":{"a":"Pat","b":"Ana"},"sides":{"A":"a","B":"b"},"set_number":1,"match_id":"c462e62c"`,
+		`"type":"point","point_id":"aa-p2","reason":"last_bounce","side":"A","to":{"a":2,"b":0,"serve":"A","over":false}`,
+		`"type":"match","phase":"ends_swapped","players":{"a":"Pat","b":"Ana"},"sides":{"A":"b","B":"a"},"set_number":1,"match_id":"c462e62c"`,
+		`"type":"point","point_id":"aa-p3","reason":"last_bounce","side":"B","to":{"a":2,"b":1,"serve":"B","over":false}`,
+		`"type":"point","point_id":"aa-p4","reason":"undo","side":" ","to":{"a":2,"b":0,"serve":"B","over":false}`,
+		`"type":"match","phase":"leave","players":{"a":"Pat","b":"Ana"},"sides":{"A":"b","B":"a"},"set_number":1,"match_id":"c462e62c"`,
+		`"type":"point","point_id":"aa-p5","reason":"last_bounce","side":"A","to":{"a":3,"b":0,"serve":"A","over":false}`,
+	} {
+		s.Handle([]byte(fmt.Sprintf(`{"v":1,"session_id":"aa","seq":%d,`, i+1)+ev+`}`), nil, now)
+	}
+	s.Close()
+
+	sum := s.Sessions()[0].Summary()
+	if len(sum.Matches) != 1 || sum.Matches["c462e62c"] != 2 {
+		t.Errorf("points per match = %v, want c462e62c 2 (an undo is no point)", sum.Matches)
+	}
+	if !strings.Contains(sum.Text(), "c462e62c") {
+		t.Errorf("the summary text does not name the match:\n%s", sum.Text())
+	}
+
+	m, _ := filepath.Glob(filepath.Join(dir, "*", "sessions", "*.jsonl"))
+	games, err := splitGames(m[0], false)
+	if err != nil {
+		t.Fatalf("splitting games: %v", err)
+	}
+	if len(games) != 1 || games[0].MatchID != "c462e62c" {
+		t.Fatalf("games = %d, match %q; want one game in c462e62c", len(games), games[0].MatchID)
+	}
+	got := map[string]string{}
+	for _, r := range games[0].Rallies {
+		got[r.Point.PointID] = r.Point.MatchID
+	}
+	for _, p := range games[0].Loose {
+		got[p.PointID] = p.MatchID
+	}
+	want := map[string]string{"aa-p1": "", "aa-p2": "c462e62c", "aa-p3": "c462e62c",
+		"aa-p4": "c462e62c", "aa-p5": ""}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("%s in match %q, want %q", id, got[id], w)
+		}
+	}
+}

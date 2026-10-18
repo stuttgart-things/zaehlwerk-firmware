@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"math"
 	"math/rand"
 	"net"
@@ -144,6 +145,11 @@ func intList(v []int) string {
 	return b.String()
 }
 
+func (m *mockSender) matchEvent(phase, matchID string) string {
+	return fmt.Sprintf(`"type":"match","phase":%q,"players":{"a":"Pat","b":"Ana"},`+
+		`"sides":{"A":"a","B":"b"},"set_number":1,"match_id":%q`, phase, matchID)
+}
+
 func runMock(args []string) error {
 	fs := flag.NewFlagSet("mock", flag.ExitOnError)
 	to := fs.String("to", "127.0.0.1:9000", "where the sink is listening")
@@ -153,6 +159,8 @@ func runMock(args []string) error {
 	corrections := fs.Float64("corrections", 0.3,
 		"fraction of points that end as a tagged correction")
 	seed := fs.Int64("seed", 1, "so a run can be repeated; 0 picks a fresh one")
+	match := fs.String("match", "",
+		"the zaehlwerk match id the board joins (#42); empty makes one up, \"none\" plays without")
 	fs.Parse(args)
 
 	// The seed also makes the session id, so two runs with the same seed are
@@ -187,6 +195,21 @@ func runMock(args []string) error {
 		`"log_threshold_b":120,"clear_ratio":1.8,"peak_window_us":30000,` +
 		`"deadtime_us":60000,"rally_timeout_ms":1500,` +
 		`"pre_trigger_samples":128,"capture_samples":512}`)
+
+	// A board with a zaehlwerk address joins the running match before the
+	// first rally and leaves it after the last, so the export can group the
+	// points by match. Made up from the session, not from rnd, so the rallies
+	// of a seed stay what they were.
+	matchID := *match
+	if matchID == "" {
+		matchID = fmt.Sprintf("%08x", crc32.ChecksumIEEE([]byte(m.session)))
+	}
+	if matchID == "none" {
+		matchID = ""
+	}
+	if matchID != "" {
+		m.emit(m.matchEvent("join", matchID))
+	}
 
 	points := 0
 	for r := 1; r <= *rallies; r++ {
@@ -261,6 +284,10 @@ func runMock(args []string) error {
 			`"reason":%q,"hint":"","side":%q,`+
 			`"from":{"a":0,"b":0,"serve":"A"},"to":{"a":1,"b":0,"serve":"B","over":false}%s`,
 			m.session, points, m.session, r, reason, winner, extra))
+	}
+
+	if matchID != "" {
+		m.emit(m.matchEvent("leave", matchID))
 	}
 
 	fmt.Printf("session %s: %d rallies, %d datagrams sent, %d dropped on purpose\n",

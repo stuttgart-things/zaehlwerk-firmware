@@ -61,6 +61,8 @@ type Session struct {
 	Reasons  map[string]uint64 // points per deciding rule
 	Tags     map[string]uint64 // corrections per tag a person chose
 	Players  map[string]uint64 // points per player, by the name in force then
+	Matches  map[string]uint64 // points per zaehlwerk match, by its match_id (#42)
+	match    string            // the zaehlwerk match in force, "" for none
 	Counted  uint64
 	Points   uint64
 	Rallies  uint64
@@ -112,6 +114,7 @@ func (s *Sink) session(id string, now time.Time) (*Session, error) {
 		Reasons:     map[string]uint64{},
 		Tags:        map[string]uint64{},
 		Players:     map[string]uint64{},
+		Matches:     map[string]uint64{},
 		ByType:      map[string]uint64{},
 		RightByType: map[string]uint64{},
 		pointSides:  map[string]string{},
