@@ -121,6 +121,12 @@ void ingest(const char *status, const char *reason, const char *action, uint32_t
 // empty.
 void link(const char *phase, const char *reason, const char *matchId, int http, uint32_t tries,
           const String &extra);
+// One button press and what it did (#56): which button (`source`), the gesture,
+// the half (' ' for none), how long it was held (0 when the button only sent
+// the gesture), the action and, for a refusal, why. pointId is the point it
+// awarded or the undo it caused, 0 for none.
+void button(const char *source, const char *gesture, char side, uint32_t heldMs,
+            const char *action, const char *reason, uint32_t pointId, uint32_t rallyId);
 // A check-in by fob (#63): the half, if a press named one, and how it came out.
 // There is no parameter for the card on purpose — the UID never reaches this log
 // (ADR-0007), and a signature without it is the way to keep it that way.
