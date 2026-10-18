@@ -192,6 +192,13 @@ void undo(uint32_t pointId, bool mock) {
   queue(report::Kind::Undo, 0, 0, false, pointId, 0);
 }
 
+bool linked(bool mock) {
+  if (!task_ || mock) return false;
+  Guard g;
+  const report::Phase p = link_.phase();
+  return p == report::Phase::Joined || p == report::Phase::Finished;
+}
+
 String statusJson(bool mock) {
   report::Status s;
   {

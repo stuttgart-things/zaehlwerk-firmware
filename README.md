@@ -111,6 +111,25 @@ A board with no filesystem is not bricked. It answers `/` with **HTTP 503** and 
 recovery page that can upload either image itself, so the way back does not need
 a cable.
 
+## Buttons
+
+Every button goes through one path (`lib/buttons`): a press arrives as a half,
+a gesture and where it came from, and the scoring code never learns whether it
+was the board's page, a radio button ([#58](../../issues/58)) or a wire.
+
+| Gesture | Does |
+| --- | --- |
+| short | a point for that half; after the game is won, starts the next |
+| long (1 s) | takes back the last point, at once |
+| very long (3 s) | a new game — refused while the board is joined to a match at zaehlwerk, whose next game starts there |
+
+The card **Taster** on the board's page has a virtual button per half: hold it
+like the real one, and it turns orange at *long* and darker at *very long*. The
+thresholds are under **Einstellungen** and stay over a restart. *Punkt*,
+*Letzten zurück* and *Neues Spiel* further down are the same presses with a
+fixed gesture. Every press is a `button` event in the log
+([schema](docs/event-schema.md)).
+
 ## Reporting to zaehlwerk-api
 
 **Off unless the board is given an address.** Without one the board counts on

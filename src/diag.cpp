@@ -421,6 +421,20 @@ void link(const char *phase, const char *reason, const char *matchId, int http, 
   emitNow("link", f);
 }
 
+void button(const char *source, const char *gesture, char side, uint32_t heldMs,
+            const char *action, const char *reason, uint32_t pointId, uint32_t rallyId) {
+  String f = String(",\"source\":\"") + source + "\",\"gesture\":\"" + gesture + "\"";
+  f += ",\"side\":";
+  if (side == 'A' || side == 'B') f += String("\"") + side + "\"";
+  else f += "null";
+  f += ",\"held_ms\":" + String(heldMs);
+  f += String(",\"action\":\"") + action + "\"";
+  if (reason && *reason) f += String(",\"reason\":\"") + reason + "\"";
+  if (pointId) f += String(",\"point_id\":\"") + sessionId_ + "-p" + pointId + "\"";
+  f += String(",\"rally_id\":\"") + sessionId_ + "-r" + rallyId + "\"";
+  emitNow("button", f);
+}
+
 void param(const char *name, const String &from, const String &to, const char *by) {
   emitNow("param", String(",\"name\":\"") + name + "\",\"from\":\"" + esc(from) +
                        "\",\"to\":\"" + esc(to) + "\",\"by\":\"" + by + "\"");
