@@ -40,7 +40,7 @@ jobs:
         working-directory: tools/log-sink
         run: go vet ./...
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.15'
 
@@ -69,7 +69,7 @@ jobs:
           # and the history. A shallow clone stamps every build 0.0.0-dev.
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.15'
 
