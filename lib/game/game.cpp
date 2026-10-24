@@ -72,4 +72,19 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
   return u;
 }
 
+Urteil aufschlagPruefen(const std::string &folge, char aufschlag, bool aufschlagRally) {
+  Urteil u{' ', "", "none"};
+  if (folge.empty() || !aufschlagRally) return u;
+  if (folge.length() == 1 && folge[0] == aufschlag) {
+    u.hinweis = "Aufschlag nicht ueber das Netz.";
+  } else if (folge[0] != aufschlag) {
+    u.hinweis = "Aufschlag nicht auf der eigenen Seite aufgesetzt.";
+  } else {
+    return u;
+  }
+  u.gewinner = andere(aufschlag);
+  u.grund    = "serve_fault";
+  return u;
+}
+
 }  // namespace game

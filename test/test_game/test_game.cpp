@@ -7,9 +7,11 @@
 
 #include <unity.h>
 
+#include <cstdio>
 #include <string>
 
 #include "game.h"
+#include "serves.h"
 
 void setUp() {}
 void tearDown() {}
@@ -149,6 +151,67 @@ static void the_first_double_bounce_decides() {
   TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("AABB", 'A').gewinner);
 }
 
+/* ---------- faulty serves, logged and not yet awarded (#83) ---------- */
+
+static void a_serve_that_did_not_cross_is_a_serve_fault() {
+  game::Urteil u = game::aufschlagPruefen("A", 'A', true);
+  TEST_ASSERT_EQUAL_CHAR('B', u.gewinner);
+  TEST_ASSERT_EQUAL_STRING("serve_fault", u.grund);
+  TEST_ASSERT_EQUAL_CHAR('A', game::aufschlagPruefen("B", 'B', true).gewinner);
+}
+
+static void a_serve_onto_the_other_half_is_a_serve_fault_whatever_follows() {
+  TEST_ASSERT_EQUAL_CHAR('B', game::aufschlagPruefen("B", 'A', true).gewinner);
+  TEST_ASSERT_EQUAL_CHAR('B', game::aufschlagPruefen("BABA", 'A', true).gewinner);
+  TEST_ASSERT_EQUAL_CHAR('A', game::aufschlagPruefen("ABB", 'B', true).gewinner);
+  TEST_ASSERT_EQUAL_STRING("serve_fault", game::aufschlagPruefen("BA", 'A', true).grund);
+}
+
+// The guard #83 insists on: a lone bounce is a serve fault only on the serve.
+// Anywhere else it is the ball being picked up, and that is what made
+// single_bounce wrong four times in five.
+static void a_lone_bounce_after_a_rally_without_a_point_is_not_a_serve_fault() {
+  TEST_ASSERT_EQUAL_STRING("none", game::aufschlagPruefen("A", 'A', false).grund);
+  TEST_ASSERT_EQUAL_STRING("none", game::aufschlagPruefen("B", 'A', false).grund);
+  TEST_ASSERT_EQUAL_CHAR(' ', game::aufschlagPruefen("BABA", 'A', false).gewinner);
+}
+
+static void a_good_serve_is_no_serve_fault() {
+  TEST_ASSERT_EQUAL_STRING("none", game::aufschlagPruefen("AB", 'A', true).grund);
+  TEST_ASSERT_EQUAL_STRING("none", game::aufschlagPruefen("ABAB", 'A', true).grund);
+  TEST_ASSERT_EQUAL_STRING("none", game::aufschlagPruefen("AA", 'A', true).grund);
+  TEST_ASSERT_EQUAL_STRING("none", game::aufschlagPruefen("", 'A', true).grund);
+}
+
+// Until the labelled round says otherwise, the score is what it was.
+static void the_score_does_not_follow_the_serve_rules_yet() {
+  TEST_ASSERT_EQUAL_STRING("single_bounce", game::rallyBewerten("A", 'A').grund);
+  TEST_ASSERT_EQUAL_CHAR(' ', game::rallyBewerten("A", 'A').gewinner);
+  TEST_ASSERT_EQUAL_STRING("last_bounce", game::rallyBewerten("BABA", 'A').grund);
+}
+
+// The replay of #83, step 2: every fixture against the rules as they stand and
+// against the serve rules on top of them. It prints both counts and asserts
+// only that the serve rules lose nothing the current rules got right: whether
+// they win enough to award is the labelled round's to say, not a test's.
+static void the_replay_of_the_serves() {
+  int jetzt = 0, mit = 0, verloren = 0;
+  const int n = sizeof(AUFSCHLAEGE) / sizeof(AUFSCHLAEGE[0]);
+  for (int i = 0; i < n; i++) {
+    const Aufschlag &a = AUFSCHLAEGE[i];
+    const game::Urteil alt = game::rallyBewerten(a.folge, a.aufschlag);
+    const game::Urteil fehler = game::aufschlagPruefen(a.folge, a.aufschlag, a.aufschlagRally);
+    const char neu = fehler.gewinner != ' ' ? fehler.gewinner : alt.gewinner;
+    if (alt.gewinner == a.richtig) jetzt++;
+    if (neu == a.richtig) mit++;
+    if (alt.gewinner == a.richtig && neu != a.richtig) verloren++;
+  }
+  char msg[96];
+  snprintf(msg, sizeof(msg), "serves: %d of %d right now, %d with serve_fault", jetzt, n, mit);
+  TEST_MESSAGE(msg);
+  TEST_ASSERT_EQUAL_INT(0, verloren);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(the_serve_changes_after_every_second_point);
@@ -169,5 +232,11 @@ int main(int, char **) {
   RUN_TEST(the_point_goes_to_the_side_that_did_not_double_bounce);
   RUN_TEST(a_double_bounce_decides_even_when_play_continued);
   RUN_TEST(the_first_double_bounce_decides);
+  RUN_TEST(a_serve_that_did_not_cross_is_a_serve_fault);
+  RUN_TEST(a_serve_onto_the_other_half_is_a_serve_fault_whatever_follows);
+  RUN_TEST(a_lone_bounce_after_a_rally_without_a_point_is_not_a_serve_fault);
+  RUN_TEST(a_good_serve_is_no_serve_fault);
+  RUN_TEST(the_score_does_not_follow_the_serve_rules_yet);
+  RUN_TEST(the_replay_of_the_serves);
   return UNITY_END();
 }

@@ -91,7 +91,12 @@ void hit(const Hit &h);
 
 // These run on the scoring side, which is already off the sampler.
 void rallyStart(uint32_t rallyId);
-void rallyEnd(uint32_t rallyId, const String &sequence, const char *closedBy);
+// serve is who served the rally and onServe whether it was the serve, the first
+// since the score last moved; serveFault the half #83's serve rules would have
+// given the point to, ' ' when they would not. 0 for serve leaves all three out,
+// as on a rally that was discarded.
+void rallyEnd(uint32_t rallyId, const String &sequence, const char *closedBy, char serve = 0,
+              bool onServe = false, char serveFault = ' ');
 // tag and note are what a person said at the moment of a correction. The tag
 // comes from a fixed vocabulary so the sink can group by it — free text does
 // not cluster, and finding what a game had in common is the whole reason for

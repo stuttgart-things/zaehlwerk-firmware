@@ -184,10 +184,21 @@ that becomes `delta: 0` at the API rather than a guessed point.
 ```json
 { "type": "rally", "rally_id": "8f3a2c11-r14", "phase": "end",
   "sequence": "ABAB", "hit_ids": ["8f3a2c11-1240", "8f3a2c11-1243"],
-  "closed_by": "timeout" }
+  "closed_by": "timeout", "serve": "A", "on_serve": true }
 ```
 
 `phase` is `start` or `end`; `closed_by` is `timeout` or `manual`.
+
+A rally that ended by timeout also says who served it (`serve`) and whether it
+was the serve (`on_serve`): the first rally since the score last moved, as
+opposed to a lone bounce after a rally that awarded nothing. When the serve
+rules of [#83](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/83)
+would have decided it — one bounce on the server's half, or a first bounce on
+the receiver's — `serve_fault` names the half they would have given the point
+to. They do not award yet: the `point` that follows is decided as before, and
+the summary counts these rallies as `serve_fault_candidates`. With a correction
+on the same rally, that is the replay #83 asks for before they go into the
+score as the reason `serve_fault`.
 
 ## `point` — the scoring logic changed state
 

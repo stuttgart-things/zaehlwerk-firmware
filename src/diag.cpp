@@ -376,10 +376,16 @@ void rallyStart(uint32_t rallyId) {
                        "\",\"phase\":\"start\"");
 }
 
-void rallyEnd(uint32_t rallyId, const String &sequence, const char *closedBy) {
-  emitNow("rally", String(",\"rally_id\":\"") + sessionId_ + "-r" + rallyId +
-                       "\",\"phase\":\"end\",\"sequence\":\"" + esc(sequence) +
-                       "\",\"closed_by\":\"" + closedBy + "\"");
+void rallyEnd(uint32_t rallyId, const String &sequence, const char *closedBy, char serve,
+              bool onServe, char serveFault) {
+  String f = String(",\"rally_id\":\"") + sessionId_ + "-r" + rallyId +
+             "\",\"phase\":\"end\",\"sequence\":\"" + esc(sequence) +
+             "\",\"closed_by\":\"" + closedBy + "\"";
+  if (serve == 'A' || serve == 'B') {
+    f += String(",\"serve\":\"") + serve + "\",\"on_serve\":" + (onServe ? "true" : "false");
+    if (serveFault == 'A' || serveFault == 'B') f += String(",\"serve_fault\":\"") + serveFault + "\"";
+  }
+  emitNow("rally", f);
 }
 
 void point(uint32_t pointId, uint32_t rallyId, const String &reason,
