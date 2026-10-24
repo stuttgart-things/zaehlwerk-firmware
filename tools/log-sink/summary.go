@@ -50,6 +50,12 @@ func (se *Session) count(raw []byte, typ string) {
 		}
 	case "rally":
 		se.Rallies++
+		var r struct {
+			ServeFault string `json:"serve_fault"`
+		}
+		if json.Unmarshal(raw, &r) == nil && r.ServeFault != "" {
+			se.ServeFaults++
+		}
 	case "match":
 		var m Match
 		if json.Unmarshal(raw, &m) == nil {
@@ -75,9 +81,13 @@ type Summary struct {
 	Counted   uint64            `json:"hits_counted"`
 	Points    uint64            `json:"points"`
 	Rallies   uint64            `json:"rallies"`
-	Reasons   map[string]uint64 `json:"points_per_reason"`
-	Tags      map[string]uint64 `json:"corrections_per_tag"`
-	Players   map[string]uint64 `json:"points_per_player"`
+	// Rallies whose end says what #83's serve rules would have awarded. Read
+	// next to the corrections of the same rallies, this is what decides
+	// whether they award at all.
+	ServeFaults uint64            `json:"serve_fault_candidates"`
+	Reasons     map[string]uint64 `json:"points_per_reason"`
+	Tags        map[string]uint64 `json:"corrections_per_tag"`
+	Players     map[string]uint64 `json:"points_per_player"`
 	// Which zaehlwerk match the points went to (#42). That id leads on to the
 	// Schmetterpause match and its players; the sink never holds a player id.
 	Matches map[string]uint64 `json:"points_per_match,omitempty"`
@@ -159,6 +169,7 @@ func (se *Session) Summary() Summary {
 		Counted:     se.Counted,
 		Points:      se.Points,
 		Rallies:     se.Rallies,
+		ServeFaults: se.ServeFaults,
 		Reasons:     se.Reasons,
 		Tags:        se.Tags,
 		Players:     se.Players,

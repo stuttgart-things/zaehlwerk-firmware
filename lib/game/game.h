@@ -29,7 +29,7 @@ struct Urteil {
   // Which rule decided. A protocol token for the log, not prose: the hint says
   // what to tell a person, this says what to count.
   const char *grund;    // "last_bounce" | "single_bounce" | "double_bounce" |
-                        // "serve_unclear" | "none"
+                        // "serve_unclear" | "serve_fault" | "none"
   // gewinner is ' ' when no point is awarded: the sequence was recorded but the
   // table could not tell what happened. That is a verdict, not a failure.
 };
@@ -37,5 +37,25 @@ struct Urteil {
 // Reads a bounce sequence such as "ABAB": who gets the point, and what makes
 // the decision uncertain?
 Urteil rallyBewerten(const std::string &folge, char aufschlag);
+
+// The two faulty serves of #83 that the sequence and the server can tell apart,
+// asked separately and deciding nothing yet. rallyBewerten() does not call this:
+// both rules were switched off once already, bundled with other changes, and
+// they come into the score only once a labelled round at the table says they
+// are better. Until then the board logs what this would have said, next to what
+// it did.
+//
+//   - One bounce, on the server's half, and nothing after it: the serve did not
+//     cross. Only on the serve, because a lone bounce at any other time is the
+//     ball settling or being picked up (see single_bounce).
+//   - First bounce on the receiver's half: the server missed their own half,
+//     whatever came after.
+//
+// aufschlagRally says the rally is the serve: the first since the score last
+// moved. grund is "serve_fault" and gewinner the receiver when one of them
+// applies; otherwise gewinner is ' ' and grund "none". The let, a serve that
+// clips the net and lands right, is two bounces like an ace and stays a
+// correction.
+Urteil aufschlagPruefen(const std::string &folge, char aufschlag, bool aufschlagRally);
 
 }  // namespace game

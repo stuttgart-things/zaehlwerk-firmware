@@ -162,6 +162,20 @@ func TestTheSummaryCountsDecisionsAndCountedSeparately(t *testing.T) {
 	}
 }
 
+// The serve rules of #83 do not award yet; the summary counts where they
+// would have, so the labelled round can be read against it.
+func TestTheSummaryCountsServeFaultCandidates(t *testing.T) {
+	s, _ := newTestSink(t)
+	now := time.Now()
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":1,"type":"rally","phase":"end","sequence":"A","serve":"A","on_serve":true,"serve_fault":"B"}`), nil, now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":2,"type":"rally","phase":"end","sequence":"A","serve":"A","on_serve":false}`), nil, now)
+	s.Handle([]byte(`{"v":1,"session_id":"aa","seq":3,"type":"rally","phase":"end","sequence":"ABAB","serve":"A","on_serve":true}`), nil, now)
+
+	if got := s.Sessions()[0].Summary().ServeFaults; got != 1 {
+		t.Errorf("serve_fault_candidates = %d, want 1", got)
+	}
+}
+
 func TestMockSessionsScoreTheSideWithoutAnybodyLabelling(t *testing.T) {
 	s, _ := newTestSink(t)
 	now := time.Now()

@@ -351,6 +351,10 @@ bool habenNamen() { return spieler[0].length() || spieler[1].length(); }
 
 char  ersterAufschlag = 'A';
 char  aufschlag = 'A';
+// Whether the next rally is the serve: from a new game and after every change
+// of score, until a rally ends with no point. A lone bounce after that is the
+// ball being picked up, not a serve that failed (#83).
+bool  aufschlagRally = true;
 bool  vorbei = false;
 char  sieger = ' ';
 
@@ -416,6 +420,7 @@ void punktGeben(char gewinner, String folge, String hinweis, const char *grund,
   const char vorAufschlag = aufschlag;
 
   if (gewinner == 'A') punkteA++; else punkteB++;
+  aufschlagRally = true;
   if (game::beendet(punkteA, punkteB)) { vorbei = true; sieger = gewinner; }
   else aufschlag = game::aufschlagFuer(punkteA, punkteB, ersterAufschlag);
   logEintragen(folge, String("Punkt fuer ") + nameFuer(gewinner), hinweis);
@@ -434,7 +439,12 @@ void rallyBeenden() {
   String folge = rally;
   rally = "";
 
-  diag::rallyEnd(rallyId, folge, "timeout");
+  // What the serve rules of #83 would have said, logged next to what the
+  // board decides and nothing more: they come into the score once a labelled
+  // round says they are better.
+  const game::Urteil fehler =
+      game::aufschlagPruefen(std::string(folge.c_str()), aufschlag, aufschlagRally);
+  diag::rallyEnd(rallyId, folge, "timeout", aufschlag, aufschlagRally, fehler.gewinner);
   rallyOffen = false;
 
   game::Urteil u = game::rallyBewerten(std::string(folge.c_str()), aufschlag);
@@ -443,6 +453,7 @@ void rallyBeenden() {
     // so nobody wonders why the score did not move, and the diagnostic one, so
     // the rally can be counted later against what actually happened.
     logEintragen(folge, "Kein Punkt", String(u.hinweis.c_str()));
+    aufschlagRally = false;
     diag::mark(String(u.grund), String(u.hinweis.c_str()), rallyId);
     // A rally that awarded nothing still goes to zaehlwerk, as delta 0 (#17).
     // Does nothing without a zaehlwerk address.
@@ -482,6 +493,7 @@ const char *zurueck(const String &marke = "", const String &kommentar = "") {
   aufschlag = s.auf; vorbei = s.ende; sieger = s.sieg;
   logAnzahl = s.logN;
   rally = "";
+  aufschlagRally = true;
   diag::point(++pointId, rallyId, "undo", "", ' ',
               vorA, vorB, vorAufschlag, punkteA, punkteB, aufschlag, vorbei,
               marke, kommentar, "", "");
@@ -499,6 +511,7 @@ bool spielLaeuft() {
 void neuesSpiel() {
   punkteA = punkteB = 0; vorbei = false; sieger = ' ';
   aufschlag = ersterAufschlag; rally = ""; logAnzahl = 0; verlaufN = 0;
+  aufschlagRally = true;
   satzNummer++;
   diag::match("start", spieler[0], spieler[1],
               seiteZuSpieler[0], seiteZuSpieler[1], satzNummer);
@@ -660,6 +673,7 @@ void zwUebernehmen(const report::State &s) {
   // after joining. Agreement is the normal case and says nothing.
   if (vorA == punkteA && vorB == punkteB && vorAufschlag == aufschlag && vorSatz == satzNummer)
     return;
+  aufschlagRally = true;
   diag::link("adopted", "", s.matchId.c_str(), 0, 0,
              String(",\"from\":{\"a\":") + vorA + ",\"b\":" + vorB + ",\"serve\":\"" +
                  vorAufschlag + "\",\"set_number\":" + vorSatz + "},\"to\":{\"a\":" + punkteA +

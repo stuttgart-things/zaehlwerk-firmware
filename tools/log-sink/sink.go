@@ -66,6 +66,9 @@ type Session struct {
 	Counted  uint64
 	Points   uint64
 	Rallies  uint64
+	// Rallies the serve rules of #83 would have decided, which the board logs
+	// on the rally's end without awarding them yet.
+	ServeFaults uint64
 
 	// Which half each point went to, so a point correction can be scored:
 	// "belongs to A" on a point A was given says the logic was right.
