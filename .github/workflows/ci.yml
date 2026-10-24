@@ -74,7 +74,7 @@ jobs:
           python-version: '3.15'
 
       - name: cache platformio
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.platformio/.cache
