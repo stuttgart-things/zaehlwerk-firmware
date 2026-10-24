@@ -74,8 +74,11 @@ void begin(const Config &cfg) {
     fromSeed = true;
   }
 
-  WiFi.mode(WIFI_STA);
+  // The hostname before the mode: arduino-esp32 2.0 applies it as the station
+  // interface starts, which mode() sets off. Set afterwards it comes too late
+  // for DHCP, and the router lists the board as esp32-<mac> instead of by name.
   WiFi.setHostname(hostname_.c_str());
+  WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
 
   if (ssid.isEmpty()) {
