@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
 
       - name: the artefacts the checks built
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: piezo-build
           path: build
