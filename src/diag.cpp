@@ -4,6 +4,8 @@
 #include <WiFiUdp.h>
 #include <esp_mac.h>
 #include <esp_random.h>
+#include <esp_system.h>
+#include <string.h>
 
 #include "config.h"
 #include "version.h"
@@ -202,6 +204,25 @@ const char *decisionName(Decision d) {
 Config cfg_{};
 String (*parameters_)() = nullptr;
 
+// Why the chip last started, as a token. A loop of sessions that each open with
+// "boot" looks the same in the sink whether it is a panic, a watchdog or the
+// supply sagging, and those have nothing in common but the symptom (#82).
+const char *resetToken(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "poweron";
+    case ESP_RST_EXT: return "external";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "int_wdt";
+    case ESP_RST_TASK_WDT: return "task_wdt";
+    case ESP_RST_WDT: return "wdt";
+    case ESP_RST_DEEPSLEEP: return "deepsleep";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_SDIO: return "sdio";
+    default: return "unknown";
+  }
+}
+
 void sayHello() {
   String f = String(",\"device_id\":\"") + esc(deviceId_) + "\"";
   f += String(",\"fw_version\":\"") + ZW_FW_VERSION + "\"";
@@ -214,6 +235,10 @@ void sayHello() {
   f += ",\"uptime_s\":" + String((uint32_t)(millis() / 1000));
   f += String(",\"sensor\":\"") + cfg_.sensor + "\"";
   f += String(",\"reason\":\"") + cfg_.reason + "\"";
+  // Only on the session a boot started: the chip's reset reason stays what it
+  // was until the next reset, and on a mode switch it would read as news.
+  if (cfg_.reason && strcmp(cfg_.reason, "boot") == 0)
+    f += String(",\"reset\":\"") + resetToken(esp_reset_reason()) + "\"";
   f += ",\"params\":" + (parameters_ ? parameters_() : cfg_.paramsJson);
   uint32_t s = seq_++;
   emit(s, head("session", s, (uint32_t)micros()) + f + "}");

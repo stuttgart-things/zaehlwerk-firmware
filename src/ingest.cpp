@@ -130,27 +130,35 @@ void loadUrl() {
 // reader take turns on it behind requestLock_, and a TLS handshake (RSA-2048 leaf, ECDSA intermediate and root, ECDHE) is
 // the expensive part of a request on an ESP32, in time and in heap. With the
 // connection kept open, a board that polls every two seconds does it once.
+//
+// Both clients live as long as the board does and are only ever stopped, never
+// deleted (#82). HTTPClient keeps a pointer to the client of its last request
+// after end() whenever that client was not connected any more, which is
+// exactly the case after a failed handshake, and touches it again in
+// setTimeout() on the next request. A client deleted in between made that a
+// read of freed memory; it went unnoticed while the next `new` happened to land
+// on the same block, and a failed certificate check, which frees and allocates
+// a lot, was what moved it: a reboot every few seconds.
 HTTPClient http_;
 WiFiClient plain_;
-WiFiClientSecure *secure_ = nullptr;
+WiFiClientSecure secure_;
 String connectedTo_;  // the base URL the open connection belongs to
 int lastTlsError_ = 0;
 // Held for a whole request, so a check-in waits for a point in flight rather
 // than sharing its connection. Never taken by the sampler or by loop().
 SemaphoreHandle_t requestLock_ = nullptr;
 
+// stop() hands everything mbedTLS held for the connection back to the heap, so
+// a stopped client costs no more than a deleted one did.
 void closeAll() {
   plain_.stop();
-  if (secure_) {
-    secure_->stop();
-    delete secure_;
-    secure_ = nullptr;
-  }
+  secure_.stop();
 }
 
 // The client for this request: the open connection if there is one to the
-// same address, otherwise a fresh one. A fresh TLS client trusts the edge root
-// and nothing else; there is no path in this file that calls setInsecure().
+// same address, otherwise a new connection on the same client. It trusts the
+// edge root and nothing else; there is no path in this file that calls
+// setInsecure().
 WiFiClient &clientFor(const String &base, bool tls, bool *reused) {
   if (base != connectedTo_) {
     closeAll();
@@ -160,18 +168,17 @@ WiFiClient &clientFor(const String &base, bool tls, bool *reused) {
     *reused = plain_.connected();
     return plain_;
   }
-  if (secure_ && secure_->connected()) {
+  if (secure_.connected()) {
     *reused = true;
-    return *secure_;
+    return secure_;
   }
   *reused = false;
-  delete secure_;
-  secure_ = new WiFiClientSecure();
-  secure_->setCACert(TLS_TRUST_ANCHORS_PEM);
+  secure_.stop();
+  secure_.setCACert(TLS_TRUST_ANCHORS_PEM);
   // The default is two minutes; a handshake that has not finished in ten
   // seconds is a network that lost packets, and the queue waits behind it.
-  secure_->setHandshakeTimeout(10);
-  return *secure_;
+  secure_.setHandshakeTimeout(10);
+  return secure_;
 }
 
 int once(WiFiClient &client, bool tls, const char *method, const String &url,
@@ -245,9 +252,9 @@ int request(const char *method, const char *path, const std::string *body,
   // Nobody answered. With TLS, say whether the certificate was the reason, and
   // print mbedTLS's reason once per change rather than on every retry.
   int code = 0;
-  if (tls && secure_) {
+  if (tls) {
     char why[96] = {0};
-    code = secure_->lastError(why, sizeof(why));
+    code = secure_.lastError(why, sizeof(why));
     if (code < -1 && code != lastTlsError_)
       Serial.printf("[zaehlwerk] TLS to %s failed: %s (-0x%04x)\n", base.c_str(), why, -code);
   }

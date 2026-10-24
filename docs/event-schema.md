@@ -69,6 +69,7 @@ switch between mock and real play, and before an OTA update.
   "git_hash": "4b9557e",
   "sensor": "adc",
   "reason": "boot",
+  "reset": "poweron",
   "params": {
     "threshold_a": 300, "threshold_b": 300,
     "log_threshold_a": 120, "log_threshold_b": 120,
@@ -87,6 +88,13 @@ switch between mock and real play, and before an OTA update.
 `sensor` is `adc` or `mock`. `reason` is `boot`, `mode_switch`, `ota` or
 `manual`. Nothing downstream may assume a session ended cleanly — a power cut
 looks like a session that simply stops.
+
+`reset` is only on a session with `reason: "boot"`, and says why the chip
+started: `poweron`, `external`, `software`, `panic`, `int_wdt`, `task_wdt`,
+`wdt`, `deepsleep`, `brownout`, `sdio` or `unknown`. A string of short sessions
+that each open with `boot` is a reboot loop; this field says which kind
+([#82](https://github.com/stuttgart-things/zaehlwerk-firmware/issues/82)). An
+OTA update and a restart from the page are `software`.
 
 `sample_rate_hz` above is a placeholder, not a decided number. What the ADC
 sustains on two channels has to be measured before anything relies on it; the
