@@ -43,7 +43,7 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
 
   /* Case 3: Ball is served but hit the net and bounced back. */
   /* Example: B Serves      folge => B B B B   Punkt A */
-  else if (folge.All(x => x == aufschlag))
+  else if (folge.find_first_not_of(aufschlag) == std::string::npos)
   {
     u.gewinner = andere(aufschlag);
     u.hinweis = "Nur ein Aufsetzer — Aufschlag ins Netz.";
@@ -55,7 +55,7 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
   {
     u.gewinner = aufschlag;
     u.hinweis = "Ass."; // hehe
-    u.grund = "single_bounce"
+    u.grund = "single_bounce";
     //hinweis = "Ass oder Netzaufschlag? Nicht unterscheidbar — bitte pruefen.";
   }
   
@@ -70,8 +70,8 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
       /* Example: B Serves     folge => B A A A A  Punkt B  Reason: A hit the Net trying to return the ball.*/
       /* Example: B Serves     folge => B A B B B  Punkt A  Reason: A hit the Net trying to return the ball.*/
       if (folge[i] == folge[i-1]) {
-        u.hinweis = String("Doppelaufsetzer auf ") + folge[i] + " — Ball nicht zurueckgespielt.";
-        u.gewinner = andere(i);          // Verhindert einen falschen Gewinner, wenn der Ball nach zweimaligem Aufprallen noch zurückgespielt wird.
+        u.hinweis = std::string("Doppelaufsetzer auf ") + folge[i] + " — Ball nicht zurueckgespielt.";
+        u.gewinner = andere(folge[i]);          // Verhindert einen falschen Gewinner, wenn der Ball nach zweimaligem Aufprallen noch zurückgespielt wird.
         u.grund = "double_bounce";
         break;
       }
