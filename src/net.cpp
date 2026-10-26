@@ -79,6 +79,10 @@ void begin(const Config &cfg) {
   // for DHCP, and the router lists the board as esp32-<mac> instead of by name.
   WiFi.setHostname(hostname_.c_str());
   WiFi.mode(WIFI_STA);
+  // Modem sleep is on by default in station mode: the radio dozes between
+  // beacons and a request from the phone waits for it, or is lost and sent
+  // again a second later. A scoreboard that answers is worth the extra current.
+  WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
 
   if (ssid.isEmpty()) {
