@@ -22,52 +22,68 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
   // The base assumption: whoever the ball last bounced on did not get it back,
   // so the point goes to the other side.
   char letzte = folge[folge.length() - 1];
-  u.gewinner  = andere(letzte);
-  u.grund     = "last_bounce";
 
+  /* Case 1: Ball is served but did not touch side of player serving. */
+  /* Example: B Serves      folge => A */
   if (folge[0] != aufschlag)
-    u.hinweis = "Erster Aufsetzer nicht auf der Aufschlagseite.";
+  {
+    u.gewinner = andere(aufschlag);
+    u.hinweis = "Erster Aufsetzer nicht auf der Aufschlagseite. Hat der Falsche Spieler gestartet? Bitte prüfen.";
+    u.grund = "serve_unclear";
 
-  for (unsigned i = 1; i < folge.length(); i++)
-    if (folge[i] == folge[i - 1]) {
-      u.hinweis = std::string("Doppelaufsetzer auf ") + folge[i] +
-                  " — Ball nicht zurueckgespielt.";
-      // Twice in a row on the same half means that side did not get the ball
-      // back. The rally ended here and the point belongs to the other side,
-      // whatever was measured afterwards. That is exactly why this branch
-      // exists rather than the base assumption above: if the ball is played on
-      // after the second bounce, this is still what decides.
-      u.gewinner = andere(folge[i]);
-      u.grund    = "double_bounce";
-      break;
+  }
+  /* Case 2: Ball is served but did not touch side of recieving player. */
+  /* Example: B Serves      folge => B         Punkt A */
+  else if (folge.length() == 1)
+  {
+    u.gewinner = andere(aufschlag);
+    u.hinweis = "Nur ein Aufsetzer — Aufschlag ins Aus.";
+    u.grund = "serve_fault";
+  }
+
+  /* Case 3: Ball is served but hit the net and bounced back. */
+  /* Example: B Serves      folge => B B B B   Punkt A */
+  else if (folge.All(x => x == aufschlag))
+  {
+    u.gewinner = andere(aufschlag);
+    u.hinweis = "Nur ein Aufsetzer — Aufschlag ins Netz.";
+    u.grund = "serve_fault";
+  }
+  /* Case 4: Ball is served. Ass.*/
+  /* Example: B Serves     folge => B A        Punkt A*/
+  else if (folge.length() == 2 && folge[0] == aufschlag && folge[1] == andere(aufschlag))
+  {
+    u.gewinner = aufschlag;
+    u.hinweis = "Ass."; // hehe
+    u.grund = "single_bounce"
+    //hinweis = "Ass oder Netzaufschlag? Nicht unterscheidbar — bitte pruefen.";
+  }
+  
+  /* Case 5: Normal Set  */
+  else
+  {
+    for (unsigned i = 1; i < folge.length(); i++)
+    {
+      /* Case 5.a - Double Instances. Someone did not hit the ball, hit the net or the ball missed the Table*/
+      /* Example: B Serves     folge => B A B A A  Punkt B  */
+      /* Example: B Serves     folge => B A B B A  Punkt A  Reason: B hit back even after two bounces. Point still goes to A*/
+      /* Example: B Serves     folge => B A A A A  Punkt B  Reason: A hit the Net trying to return the ball.*/
+      /* Example: B Serves     folge => B A B B B  Punkt A  Reason: A hit the Net trying to return the ball.*/
+      if (folge[i] == folge[i-1]) {
+        u.hinweis = String("Doppelaufsetzer auf ") + folge[i] + " — Ball nicht zurueckgespielt.";
+        u.gewinner = andere(i);          // Verhindert einen falschen Gewinner, wenn der Ball nach zweimaligem Aufprallen noch zurückgespielt wird.
+        u.grund = "double_bounce";
+        break;
+      }
+      /* Case 5.b - Single Instances. Someone did not hit the ball or the ball missed the Table*/
+      /* Example: B Serves     folge => B A B A B  Punkt A  */
+      else
+      {
+        u.gewinner = andere(letzte);
+        u.grund = "last_bounce";
+      }
     }
-
-  // These two were stopped from awarding on 2026-09-30 and put back the same
-  // evening. The sketch this was ported from awarded them, and a game with them
-  // switched off was worse, not better: almost every rally ended with nobody
-  // getting the point and somebody reaching for the phone. The reason is still
-  // recorded, so the log says which rule decided and how confident it was.
-  // One bounce and then silence is not a rally. It is the ball settling after the
-  // point was already decided, or a ball being picked up off the table — and
-  // awarding it to the other side is a coin flip.
-  //
-  // Measured over two games on 2026-10-01: this fired five times and **four of
-  // them were taken back within seconds**, which is four of the six corrections
-  // in those games. The rule next to it, serve_unclear, fired four times and was
-  // never corrected — which is why only this one stops awarding. Both were
-  // switched off together the evening before, bundled with four other changes
-  // that made counting worse, and both came back when that was reverted. This is
-  // the half the data supports.
-  if (folge.length() == 1) {
-    u.hinweis  = "Nur ein Aufsetzer — kein Punkt, bitte selbst vergeben.";
-    u.grund    = "single_bounce";
-    u.gewinner = ' ';
   }
-  if (folge.length() == 2 && folge[0] == aufschlag && folge[1] == andere(aufschlag)) {
-    u.hinweis = "Ass oder Netzaufschlag? Nicht unterscheidbar — bitte pruefen.";
-    u.grund   = "serve_unclear";
-  }
-
 
   return u;
 }
