@@ -52,6 +52,7 @@ button{flex:1;border:1px solid var(--line);background:#fff;border-radius:6px;pad
 font:600 14px inherit;color:var(--ink);cursor:pointer}
 button:active{background:#E7ECF0}
 button.warn{border-color:var(--orange);color:#B8541F}
+button:disabled,input:disabled{opacity:.45;cursor:not-allowed}
 button.taster{padding:30px 6px;font-size:22px;touch-action:none;user-select:none;-webkit-user-select:none}
 button.taster.lang{background:#FFF0E8;border-color:var(--orange)}
 button.taster.sehr{background:#FFE0D0;border-color:#B8541F}
@@ -137,7 +138,7 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   </div>
   <div class="row" style="margin-top:8px">
     <button class="warn" onclick="go('/zurueck')">Letzten zurück</button>
-    <button onclick="go('/neu')">Neues Spiel</button>
+    <button id="bneu" onclick="go('/neu')">Neues Spiel</button>
   </div>
   <div class="row ends">
     <button class="warn" onclick="seiten()">Seiten wechseln</button>
@@ -153,7 +154,7 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
     <label style="margin:0">Haelfte B</label>
     <input type="text" id="pb" autocomplete="off" placeholder="Name, im Doppel beide">
     <div class="tags" id="zuletzt"></div>
-    <button onclick="spielerSpeichern()">Namen uebernehmen</button>
+    <button id="bnam" onclick="spielerSpeichern()">Namen uebernehmen</button>
     <div class="msg" id="pm">Ohne Namen bleibt alles bei A und B.</div>
   </div>
 </div>
@@ -290,7 +291,7 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
 </div>
 
 <div class="foot" id="ver"></div>
-<div class="probe" id="pb"></div>
+<div class="probe" id="pr"></div>
 
 </div><script>
 let halt=0;
@@ -400,10 +401,23 @@ document.querySelectorAll('button.taster').forEach(b=>{
 })();
 
 let stand = Date.now();
+// Linked, the next game and the names are zaehlwerk's (ADR-0008): the board
+// refuses both and takes the names over on the next answer. Greyed out with
+// the reason beats two buttons that seem to do nothing.
+let verbunden=null;
+function zwSperre(an){
+  if(an===verbunden)return;
+  verbunden=an;
+  bneu.disabled=bnam.disabled=pa.disabled=pb.disabled=an;
+  bneu.title=an?'Verbunden mit Zählwerk: das nächste Spiel beginnt dort.':'';
+  pm.textContent=an?'Verbunden mit Zählwerk: Namen und neues Spiel kommen von dort.'
+                   :'Ohne Namen bleibt alles bei A und B.';
+}
 function tick(){
   if(Date.now()<halt)return;
   fetch('/state').then(r=>r.json()).then(d=>{
     sc.textContent=d.a+':'+d.b;
+    zwSperre(!!d.linked);
       kst.textContent=d.a+':'+d.b;
     wa.textContent=d.na; wb.textContent=d.nb;
     wa.classList.toggle('srv', !d.over && d.serve=='A');
@@ -434,7 +448,7 @@ function tick(){
       `<div class="entry${e.h?' w':''}"><div class="f">${[...e.f].join(' → ')}</div>
        <div>${e.u}</div>${e.h?`<div class="h">${e.h}</div>`:''}</div>`).reverse().join('')
       :'<div style="color:#5C6B7A;font-size:13px">Noch nichts gespielt.</div>';
-    pb.textContent = d.img==='pending'
+    pr.textContent = d.img==='pending'
       ? 'Neuer Stand laeuft auf Probe. Bewaehrt er sich, wird er bestaetigt; '
         +'stuerzt er ab, kommt der alte von selbst zurueck.'
       : '';
