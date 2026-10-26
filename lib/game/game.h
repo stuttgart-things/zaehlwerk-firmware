@@ -39,11 +39,9 @@ struct Urteil {
 Urteil rallyBewerten(const std::string &folge, char aufschlag);
 
 // The two faulty serves of #83 that the sequence and the server can tell apart,
-// asked separately and deciding nothing yet. rallyBewerten() does not call this:
-// both rules were switched off once already, bundled with other changes, and
-// they come into the score only once a labelled round at the table says they
-// are better. Until then the board logs what this would have said, next to what
-// it did.
+// asked separately. Since #89 rallyBewerten() awards serve faults by rules of
+// its own, without the aufschlagRally guard below; this one is still what the
+// board logs next to every rally, so the two can be compared afterwards.
 //
 //   - One bounce, on the server's half, and nothing after it: the serve did not
 //     cross. Only on the serve, because a lone bounce at any other time is the
