@@ -134,21 +134,64 @@ void rallyBeenden() {
   rally = "";
 
   char letzte    = folge[folge.length() - 1];
-  char gewinner  = andere(letzte);
+  char gewinner; 
   String hinweis = "";
 
+  /* Case 1: Ball is served but did not touch side of player serving. */
+  /* Example: B Serves      folge => A */
   if (folge[0] != aufschlag)
+  {
+    gewinner = andere(aufschlag)
     hinweis = "Erster Aufsetzer nicht auf der Aufschlagseite.";
-  for (unsigned i = 1; i < folge.length(); i++)
-    if (folge[i] == folge[i-1]) {
-      hinweis = String("Doppelaufsetzer auf ") + folge[i] + " — Ball nicht zurueckgespielt.";
-      gewinner = andere(i);          // Verhindert einen falschen Gewinner, wenn der Ball nach zweimaligem Aufprallen noch zurückgespielt wird.
-      break;
+  }
+  /* Case 2: Ball is served but did not touch side of recieving player. */
+  /* Example: B Serves      folge => B         Punkt A */
+  else if (folge.length() == 1)
+  {
+    gewinner = andere(aufschlag)
+    hinweis = "Nur ein Aufsetzer — Aufschlag ins Aus.";
+  }
+
+  /* TODO-TEST Case 3: Ball is served but hit the net. */
+  /* Example: B Serves      folge => B B B B   Punkt A */
+  else if (folge.All(x => x == aufschlag))
+  {
+    gewinner = andere(aufschlag)
+    hinweis = "Nur ein Aufsetzer — Aufschlag ins Netz.";
+  }
+  /* TODO-ASK Case 4: Ball is served. I dont know how this is net.*/
+  /* Example: B Serves     folge => B A        Punkt A*/
+  else if (folge.length() == 2 && folge[0] == aufschlag && folge[1] == andere(aufschlag))
+  {
+    gewinner = aufschlag
+    hinweis = "Ass."; // hehe
+    //hinweis = "Ass oder Netzaufschlag? Nicht unterscheidbar — bitte pruefen.";
+  }
+  
+  /* Case 5: Normal Set  */
+  else
+  {
+    for (unsigned i = 1; i < folge.length(); i++)
+    {
+      /* Case 5.a - Double Instances. Someone did not hit the ball, hit the net or the ball missed the Table*/
+      /* Example: B Serves     folge => B A B A A  Punkt B  */
+      /* Example: B Serves     folge => B A B B A  Punkt A  Reason: B hit back even after two bounces. Point still goes to A*/
+      /* Example: B Serves     folge => B A A A A  Punkt B  Reason: A hit the Net trying to return the ball.*/
+      /* Example: B Serves     folge => B A B B B  Punkt A  Reason: A hit the Net trying to return the ball.*/
+      if (folge[i] == folge[i-1]) {
+        hinweis = String("Doppelaufsetzer auf ") + folge[i] + " — Ball nicht zurueckgespielt.";
+        gewinner = andere(i);          // Verhindert einen falschen Gewinner, wenn der Ball nach zweimaligem Aufprallen noch zurückgespielt wird.
+        break;
+      }
+      /* Case 5.b - Single Instances. Someone did not hit the ball or the ball missed the Table*/
+      /* Example: B Serves     folge => B A B A B  Punkt A  */
+      else
+      {
+        gewinner = andere(letzte);
+      }
     }
-  if (folge.length() == 1)
-    hinweis = "Nur ein Aufsetzer — Aufschlag ins Netz oder ins Aus.";
-  if (folge.length() == 2 && folge[0] == aufschlag && folge[1] == andere(aufschlag))
-    hinweis = "Ass oder Netzaufschlag? Nicht unterscheidbar — bitte pruefen.";
+  }
+  Serial.printf("\nReinfolge: %s\nPunkt für %c!\n\n", folge, gewinner);
 
   punktGeben(gewinner, folge, hinweis);
 }
