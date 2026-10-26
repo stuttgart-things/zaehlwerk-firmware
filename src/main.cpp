@@ -439,9 +439,9 @@ void rallyBeenden() {
   String folge = rally;
   rally = "";
 
-  // What the serve rules of #83 would have said, logged next to what the
-  // board decides and nothing more: they come into the score once a labelled
-  // round says they are better.
+  // What the serve rules of #83 say, logged next to what the board decides.
+  // rallyBewerten awards serve faults by its own rules since #89; this keeps
+  // the guarded version on record to compare against.
   const game::Urteil fehler =
       game::aufschlagPruefen(std::string(folge.c_str()), aufschlag, aufschlagRally);
   diag::rallyEnd(rallyId, folge, "timeout", aufschlag, aufschlagRally, fehler.gewinner);

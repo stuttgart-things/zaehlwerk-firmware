@@ -29,7 +29,7 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
   {
     u.gewinner = andere(aufschlag);
     u.hinweis = "Erster Aufsetzer nicht auf der Aufschlagseite. Hat der Falsche Spieler gestartet? Bitte prüfen.";
-    u.grund = "serve_unclear";
+    u.grund = "serve_fault";
 
   }
   /* Case 2: Ball is served but did not touch side of recieving player. */
@@ -55,7 +55,9 @@ Urteil rallyBewerten(const std::string &folge, char aufschlag) {
   {
     u.gewinner = aufschlag;
     u.hinweis = "Ass."; // hehe
-    u.grund = "single_bounce";
+    // Still the token for these two bounces: an ace and a let are the same
+    // sequence, and the log keeps counting them under one name.
+    u.grund = "serve_unclear";
     //hinweis = "Ass oder Netzaufschlag? Nicht unterscheidbar — bitte pruefen.";
   }
   

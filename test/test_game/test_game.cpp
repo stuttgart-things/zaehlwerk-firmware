@@ -59,30 +59,38 @@ static void the_point_goes_to_the_side_of_the_second_to_last_bounce() {
   TEST_ASSERT_TRUE(u.hinweis.empty());
 }
 
-static void a_single_bounce_awards_nothing() {
-  // Fired five times across two games on 2026-10-01 and four were taken back
-  // within seconds. The sequence is recorded, the point is given by hand.
+// Since #89 a single bounce on the server's half is a serve that did not cross,
+// and the point goes to the receiver. Before, it awarded nothing: on 2026-10-01
+// four of five were taken back within seconds. Worth watching in the log.
+static void a_single_bounce_on_the_serve_side_is_a_serve_fault() {
   game::Urteil u = game::rallyBewerten("A", 'A');
-  TEST_ASSERT_EQUAL_CHAR(' ', u.gewinner);
-  TEST_ASSERT_EQUAL_STRING("single_bounce", u.grund);
+  TEST_ASSERT_EQUAL_CHAR('B', u.gewinner);
+  TEST_ASSERT_EQUAL_STRING("serve_fault", u.grund);
   TEST_ASSERT_TRUE(u.hinweis.find("Nur ein Aufsetzer") != std::string::npos);
 }
 
-// The rule beside it still awards: four times in the same two games, never
-// corrected. Switching both off together was the mistake the evening before.
+static void a_serve_that_stays_on_its_own_half_is_a_serve_fault() {
+  game::Urteil u = game::rallyBewerten("AAA", 'A');
+  TEST_ASSERT_EQUAL_CHAR('B', u.gewinner);
+  TEST_ASSERT_EQUAL_STRING("serve_fault", u.grund);
+  TEST_ASSERT_EQUAL_CHAR('A', game::rallyBewerten("BB", 'B').gewinner);
+}
+
+// Four times in two games on 2026-10-01, never corrected.
 static void an_unclear_serve_still_awards() {
   game::Urteil u = game::rallyBewerten("AB", 'A');
   TEST_ASSERT_EQUAL_CHAR('A', u.gewinner);
   TEST_ASSERT_EQUAL_STRING("serve_unclear", u.grund);
 }
 
-static void two_bounces_from_the_serve_are_ambiguous() {
+static void two_bounces_from_the_serve_are_an_ace() {
   // An ace and a serve that clipped the net are the same two bounces from under
-  // the table, and they are not the same thing: one is a point, the other a let.
+  // the table. Since #89 the hint calls it an ace; a let is corrected by hand.
   game::Urteil u = game::rallyBewerten("AB", 'A');
   TEST_ASSERT_EQUAL_CHAR('A', u.gewinner);
   TEST_ASSERT_EQUAL_STRING("serve_unclear", u.grund);
-  TEST_ASSERT_TRUE(u.hinweis.find("Ass oder Netzaufschlag") != std::string::npos);
+  TEST_ASSERT_TRUE(u.hinweis.find("Ass") != std::string::npos);
+  TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("BA", 'B').gewinner);
 }
 
 // The rules that still award, so the change above cannot quietly swallow them.
@@ -114,11 +122,11 @@ static void an_empty_sequence_awards_nothing() {
 // than being derived from the German hint afterwards.
 static void the_reason_names_the_rule_that_decided() {
   TEST_ASSERT_EQUAL_STRING("last_bounce", game::rallyBewerten("ABAB", 'A').grund);
-  TEST_ASSERT_EQUAL_STRING("single_bounce", game::rallyBewerten("A", 'A').grund);
+  TEST_ASSERT_EQUAL_STRING("serve_fault", game::rallyBewerten("A", 'A').grund);
+  TEST_ASSERT_EQUAL_STRING("serve_unclear", game::rallyBewerten("AB", 'A').grund);
   TEST_ASSERT_EQUAL_STRING("double_bounce", game::rallyBewerten("ABAA", 'A').grund);
-  // A first bounce on the wrong side is a hint, not a rule — the last bounce
-  // still decides.
-  TEST_ASSERT_EQUAL_STRING("last_bounce", game::rallyBewerten("BABA", 'A').grund);
+  // A first bounce on the wrong side decides on its own since #89.
+  TEST_ASSERT_EQUAL_STRING("serve_fault", game::rallyBewerten("BABA", 'A').grund);
 }
 
 // Two bounces in a row on the same half mean the ball did not come back, so the
@@ -151,7 +159,7 @@ static void the_first_double_bounce_decides() {
   TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("AABB", 'A').gewinner);
 }
 
-/* ---------- faulty serves, logged and not yet awarded (#83) ---------- */
+/* ---------- faulty serves (#83), awarded since #89 ---------- */
 
 static void a_serve_that_did_not_cross_is_a_serve_fault() {
   game::Urteil u = game::aufschlagPruefen("A", 'A', true);
@@ -183,11 +191,13 @@ static void a_good_serve_is_no_serve_fault() {
   TEST_ASSERT_EQUAL_STRING("none", game::aufschlagPruefen("", 'A', true).grund);
 }
 
-// Until the labelled round says otherwise, the score is what it was.
-static void the_score_does_not_follow_the_serve_rules_yet() {
-  TEST_ASSERT_EQUAL_STRING("single_bounce", game::rallyBewerten("A", 'A').grund);
-  TEST_ASSERT_EQUAL_CHAR(' ', game::rallyBewerten("A", 'A').gewinner);
-  TEST_ASSERT_EQUAL_STRING("last_bounce", game::rallyBewerten("BABA", 'A').grund);
+// The score follows the serve rules now, with one difference to
+// aufschlagPruefen: rallyBewerten does not know whether this rally is the serve,
+// so a lone bounce awards at any time.
+static void the_score_follows_the_serve_rules() {
+  TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("A", 'A').gewinner);
+  TEST_ASSERT_EQUAL_CHAR('B', game::rallyBewerten("BABA", 'A').gewinner);
+  TEST_ASSERT_EQUAL_CHAR(' ', game::aufschlagPruefen("A", 'A', false).gewinner);
 }
 
 // The replay of #83, step 2: every fixture against the rules as they stand and
@@ -220,9 +230,10 @@ int main(int, char **) {
   RUN_TEST(eleven_points_with_two_clear_ends_the_set);
   RUN_TEST(a_single_point_lead_carries_on);
   RUN_TEST(the_point_goes_to_the_side_of_the_second_to_last_bounce);
-  RUN_TEST(a_single_bounce_awards_nothing);
+  RUN_TEST(a_single_bounce_on_the_serve_side_is_a_serve_fault);
+  RUN_TEST(a_serve_that_stays_on_its_own_half_is_a_serve_fault);
   RUN_TEST(an_unclear_serve_still_awards);
-  RUN_TEST(two_bounces_from_the_serve_are_ambiguous);
+  RUN_TEST(two_bounces_from_the_serve_are_an_ace);
   RUN_TEST(a_longer_rally_still_awards);
   RUN_TEST(a_double_bounce_still_awards);
   RUN_TEST(a_first_bounce_on_the_wrong_side_is_recorded);
@@ -236,7 +247,7 @@ int main(int, char **) {
   RUN_TEST(a_serve_onto_the_other_half_is_a_serve_fault_whatever_follows);
   RUN_TEST(a_lone_bounce_after_a_rally_without_a_point_is_not_a_serve_fault);
   RUN_TEST(a_good_serve_is_no_serve_fault);
-  RUN_TEST(the_score_does_not_follow_the_serve_rules_yet);
+  RUN_TEST(the_score_follows_the_serve_rules);
   RUN_TEST(the_replay_of_the_serves);
   return UNITY_END();
 }
