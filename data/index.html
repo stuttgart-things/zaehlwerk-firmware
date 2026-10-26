@@ -142,6 +142,7 @@ border:1px solid var(--line);border-radius:6px;font:13px inherit;background:#fff
   </div>
   <div class="row ends">
     <button class="warn" onclick="seiten()">Seiten wechseln</button>
+    <button id="bauf" onclick="aufschlagWechseln()">Aufschlag wechseln</button>
   </div>
   <div class="msg" id="sm">Seiten nach jedem Satz. Wird das vergessen, wandern
     alle weiteren Punkte auf die falsche Person.</div>
@@ -408,9 +409,9 @@ let verbunden=null;
 function zwSperre(an){
   if(an===verbunden)return;
   verbunden=an;
-  bneu.disabled=bnam.disabled=pa.disabled=pb.disabled=an;
+  bneu.disabled=bnam.disabled=bauf.disabled=pa.disabled=pb.disabled=an;
   bneu.title=an?'Verbunden mit Zählwerk: das nächste Spiel beginnt dort.':'';
-  pm.textContent=an?'Verbunden mit Zählwerk: Namen und neues Spiel kommen von dort.'
+  pm.textContent=an?'Verbunden mit Zählwerk: Namen, Aufschlag und neues Spiel kommen von dort.'
                    :'Ohne Namen bleibt alles bei A und B.';
 }
 function tick(){
@@ -529,6 +530,14 @@ function spielerSpeichern(){
       pm.textContent = d.named ? 'Uebernommen.' : 'Ohne Namen bleibt alles bei A und B.';
       spielerLaden(); tick();
     }).catch(()=>{pm.textContent='Ging nicht.'});
+}
+// Who served first, flipped. The serve now follows from that and the score.
+function aufschlagWechseln(){
+  halt=Date.now()+600;
+  fetch('/aufschlag').then(r=>r.json()).then(d=>{
+    sm.textContent = d.serve ? 'Aufschlag gewechselt.' : 'Nichts passiert.';
+    tick();
+  }).catch(()=>{});
 }
 function seiten(){
   halt=Date.now()+600;

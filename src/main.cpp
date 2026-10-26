@@ -1126,6 +1126,23 @@ void setup() {
     seitenWechseln();
     server.send(200, "text/plain", "ok");
   });
+  // Who served first. Unlinked it was always A, with no way to say otherwise:
+  // a game begun from B had the board one serve off from the first point on,
+  // and taking a point back only restored the wrong server. Since #89 that
+  // costs points too — a first bounce on the half the board thinks is the
+  // receiver's is a serve fault. Linked, zaehlwerk says who serves.
+  server.on("/aufschlag", []{
+    if (reporter::linked(mock::on())) {
+      server.send(409, "application/json", "{\"reason\":\"serve_on_zaehlwerk\"}");
+      return;
+    }
+    const char vorher = ersterAufschlag;
+    ersterAufschlag = game::andere(ersterAufschlag);
+    if (!vorbei) aufschlag = game::aufschlagFuer(punkteA, punkteB, ersterAufschlag);
+    diag::param("first_serve", String(vorher), String(ersterAufschlag), "web");
+    server.send(200, "application/json",
+                String("{\"serve\":\"") + aufschlag + "\",\"first\":\"" + ersterAufschlag + "\"}");
+  });
 
   server.on("/diag", []{
     if (server.hasArg("host"))
