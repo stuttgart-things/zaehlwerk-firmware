@@ -33,7 +33,7 @@ permissions:
 jobs:
   build-pr:
     if: github.event_name == 'pull_request'
-    uses: stuttgart-things/github-workflow-templates/.github/workflows/call-ko-build.yaml@main
+    uses: stuttgart-things/github-workflow-templates/.github/workflows/call-ko-build.yaml@15bb803fd72658fda50120f8a566d5594061e6ee # v1.2.0
     with:
       go-version: '1.24'
       working-directory: tools/log-sink
@@ -47,7 +47,7 @@ jobs:
 
   build:
     if: github.event_name != 'pull_request'
-    uses: stuttgart-things/github-workflow-templates/.github/workflows/call-ko-build.yaml@main
+    uses: stuttgart-things/github-workflow-templates/.github/workflows/call-ko-build.yaml@15bb803fd72658fda50120f8a566d5594061e6ee # v1.2.0
     with:
       go-version: '1.24'
       working-directory: tools/log-sink
